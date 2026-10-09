@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bitchat-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-09",
+  "workers_dev": false,
+  "routes": [{ "pattern": "chat.123456714.xyz", "custom_domain": true }],
+  "durable_objects": {
+    "bindings": [
+      { "name": "ROOMS", "class_name": "RoomObject" },
+      { "name": "MAILBOXES", "class_name": "MailboxObject" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomObject", "MailboxObject"] }],
+  "vars": {
+    "MAX_CONNECTIONS": "256",
+    "MAX_FRAME_BYTES": "98304",
+    "PACKETS_PER_MINUTE": "2400",
+    "MAILBOX_MAX_PACKETS": "100",
+    "MAILBOX_TTL_SECONDS": "300"
+  },
+  "observability": { "enabled": false }
+}

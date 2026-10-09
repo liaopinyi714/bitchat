@@ -1,0 +1,17 @@
+* text=auto eol=lf
+*.kt text eol=lf
+*.kts text eol=lf
+*.ts text eol=lf
+*.json text eol=lf
+*.jsonc text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+gradlew text eol=lf
+*.bat text eol=crlf
+*.jar binary
+*.so binary
+*.png binary
+*.webp binary
+*.jpg binary

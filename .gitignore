@@ -1,0 +1,12 @@
+.build/
+node_modules/
+.wrangler/
+.dev.vars*
+!.dev.vars.example
+*.jks
+*.keystore
+local.properties
+*.log
+dist/
+coverage/
+
