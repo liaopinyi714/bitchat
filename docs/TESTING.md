@@ -36,6 +36,8 @@ cd android
 
 Lint 已运行，但当前报告仍有错误和警告。上游配置的 `abortOnError=false` 使 Gradle 任务成功结束，这不能解释为 Lint 零错误。报告主要涉及既有翻译、权限、数量资源和 Compose 检查；正式发行前应逐项审查，不能简单关闭检查或把整份报告加入 baseline。
 
+最终本地报告：手机 303 errors / 339 warnings / 17 hints，Wear 37 errors / 51 warnings / 10 hints；不含被 baseline 过滤的项目。新增中继、频道入口及本次修改的媒体保存代码没有报告 Error。这个范围检查并不替代完整项目的审查。
+
 本次修正了旧 Android 上的接收器注册和图片保存，并把文件保存接入系统文件选择器。完整报告仅保留在本地构建目录，不上传设备或开发环境日志。
 
 ## 尚未执行
