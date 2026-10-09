@@ -50,7 +50,7 @@ class CloudflareMeshService(
             if (channel != null) {
                 cachePublicPacket(packet)
                 val connection = rooms[channel]
-                val mirror = if (connection?.ready == true) routed.copy(transferId = null) else routed
+                val mirror = if (connection?.ready == true) routed.copy(reportTransferProgress = false) else routed
                 val local = if (packet.type == MessageType.REQUEST_SYNC.value) false else mirrorTopic(mirror)
                 val online = if (connection?.ready == true) sender.send(routed, "topic") { connection.send(it.packet) } else false
                 if (!online) TopicRelayState.setStatus(channel, "offline")

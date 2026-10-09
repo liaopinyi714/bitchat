@@ -31,18 +31,19 @@ class FragmentingPacketSender(
         sendSingle: (RoutedPacket) -> Boolean
     ): Boolean {
         val transferId = transferIdFor(routed)
+        val progressId = transferId.takeIf { routed.reportTransferProgress }
         val packets = packetsForTransport(routed)
         if (packets == null) {
-            if (transferId != null) {
-                TransferProgressManager.fail(transferId)
+            if (progressId != null) {
+                TransferProgressManager.fail(progressId)
             }
             return false
         }
         val total = packets.size
 
         if (total <= 1) {
-            if (transferId != null) {
-                TransferProgressManager.start(transferId, 1)
+            if (progressId != null) {
+                TransferProgressManager.start(progressId, 1)
             }
             val sent = sendSingle(
                 routed.copy(
@@ -51,20 +52,20 @@ class FragmentingPacketSender(
                     preparedPackets = null
                 )
             )
-            if (transferId != null) {
+            if (progressId != null) {
                 if (sent) {
-                    TransferProgressManager.progress(transferId, 1, 1)
-                    TransferProgressManager.complete(transferId, 1)
+                    TransferProgressManager.progress(progressId, 1, 1)
+                    TransferProgressManager.complete(progressId, 1)
                 } else {
-                    TransferProgressManager.fail(transferId)
+                    TransferProgressManager.fail(progressId)
                 }
             }
             return sent
         }
 
         Log.d(logTag, "Fragmenting packet type ${routed.packet.type} into $total fragments for $description")
-        if (transferId != null) {
-            TransferProgressManager.start(transferId, total)
+        if (progressId != null) {
+            TransferProgressManager.start(progressId, total)
         }
 
         val job = scope.launch(start = CoroutineStart.LAZY) {
@@ -91,16 +92,16 @@ class FragmentingPacketSender(
                 }
 
                 sent += 1
-                if (transferId != null) {
-                    TransferProgressManager.progress(transferId, sent, total)
+                if (progressId != null) {
+                    TransferProgressManager.progress(progressId, sent, total)
                 }
                 if (sent < total) {
                     delay(interFragmentDelayMs)
                 }
             }
 
-            if (transferId != null) {
-                TransferProgressManager.complete(transferId, total)
+            if (progressId != null) {
+                TransferProgressManager.complete(progressId, total)
             }
         }
 

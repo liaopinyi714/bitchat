@@ -15,5 +15,8 @@ data class RoutedPacket(
     val preparedPackets: List<BitchatPacket>? = null,
     // Opaque, process-local ingress identity. Unlike relayAddress, this distinguishes replacement
     // sockets for the same provisional peer and must never be serialized onto the mesh.
-    val ingressLinkID: String? = null
+    val ingressLinkID: String? = null,
+    // Mirrored sends retain cancellation identity while the primary transport reports progress.
+    // This is process-local metadata and is never encoded in a mesh packet.
+    val reportTransferProgress: Boolean = true
 )

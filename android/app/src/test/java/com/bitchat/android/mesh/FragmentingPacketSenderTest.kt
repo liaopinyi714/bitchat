@@ -11,6 +11,11 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.advanceTimeBy
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -22,6 +27,25 @@ import java.util.Random
 class FragmentingPacketSenderTest {
 
     private val senderID = "1122334455667788"
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `cancelling a mirrored transfer stops remaining fragments by its original id`() = runTest {
+        val sender = FragmentingPacketSender(backgroundScope, null, "test", interFragmentDelayMs = 20L)
+        val packet = packetWithPayload(32).copy(timestamp = 1_000uL)
+        val writes = mutableListOf<RoutedPacket>()
+        val routed = RoutedPacket(packet, transferId = "synthetic-mirror-transfer",
+            preparedPackets = List(3) { packet }, reportTransferProgress = false)
+        assertTrue(sender.send(routed, "mirrored send") { writes.add(it); true })
+        runCurrent()
+        assertEquals(1, writes.size)
+        assertEquals("synthetic-mirror-transfer", writes.single().transferId)
+        assertTrue(sender.cancelTransfer("synthetic-mirror-transfer"))
+        advanceTimeBy(200L)
+        runCurrent()
+        assertEquals(1, writes.size)
+        assertFalse(sender.cancelTransfer("synthetic-mirror-transfer"))
+    }
 
     private fun packetWithPayload(bytes: Int): BitchatPacket {
         val payload = ByteArray(bytes)

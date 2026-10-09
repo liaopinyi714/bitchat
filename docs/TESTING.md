@@ -8,14 +8,16 @@
 | --- | --- |
 | Android 手机通用 debug APK | 构建成功 |
 | Wear debug APK | 构建成功 |
-| 手机 JVM / Robolectric 测试 | 598 项，0 失败，3 跳过 |
-| Wear JVM / Robolectric 测试 | 195 项，0 失败 |
+| 手机 JVM / Robolectric 测试 | 599 项，0 失败，3 跳过 |
+| Wear JVM / Robolectric 测试 | 196 项，0 失败 |
 | clientRewriteContractTest | 通过 |
 | Worker TypeScript 检查 | 通过 |
 | Worker 在 Workerd 中的测试 | 19 项通过 |
 | 锁文件依赖安装及 Wrangler dry-run | 通过，未实际部署 |
 
 新增客户端测试覆盖频道名称规范、独立计算的房间 ID / PBKDF2 / 密钥摘要向量、公开封装向量、AES-GCM 篡改和降级拒绝、密码变更，以及 X25519 / HMAC 身份证明。Worker 测试覆盖双密钥身份认证、重放和冒名拒绝、房间与邮箱路由、创建者权限、休眠后状态、密码变更、限流、离线队列确认和过期、同房间定向历史同步。
+
+共享传输测试还验证：镜像传输使用原始取消标识，取消后不会继续发送剩余分片；主传输报告进度，镜像传输保留取消能力。
 
 复查命令：
 
