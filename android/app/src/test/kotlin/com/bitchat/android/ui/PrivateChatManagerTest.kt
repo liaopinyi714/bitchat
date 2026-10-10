@@ -36,7 +36,7 @@ class PrivateChatManagerTest {
         state = ChatState(TestScope())
         manager = PrivateChatManager(
             state = state,
-            messageManager = MessageManager(state),
+            messageManager = MessageManager(state, RuntimeEnvironment.getApplication()),
             dataManager = DataManager(RuntimeEnvironment.getApplication()),
             noiseSessionDelegate = mock()
         )
@@ -73,7 +73,7 @@ class PrivateChatManagerTest {
     fun `headless Nostr processing stores messages without retaining UI unread work`() {
         val headlessManager = PrivateChatManager(
             state = state,
-            messageManager = MessageManager(state),
+            messageManager = MessageManager(state, RuntimeEnvironment.getApplication()),
             dataManager = DataManager(RuntimeEnvironment.getApplication()),
             noiseSessionDelegate = mock(),
             trackUnreadMessages = false
@@ -179,7 +179,7 @@ class PrivateChatManagerTest {
         val meshService = mock<MeshService>()
         manager = PrivateChatManager(
             state = state,
-            messageManager = MessageManager(state),
+            messageManager = MessageManager(state, RuntimeEnvironment.getApplication()),
             dataManager = DataManager(RuntimeEnvironment.getApplication()),
             noiseSessionDelegate = mock(),
             hasReadReceiptBeenSent = { it == oldMessage.id }

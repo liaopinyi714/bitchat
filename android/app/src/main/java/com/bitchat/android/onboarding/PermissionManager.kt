@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.PowerManager
 import android.util.Log
+import androidx.annotation.StringRes
 import androidx.core.content.ContextCompat
 import com.bitchat.android.R
 
@@ -14,6 +15,8 @@ import com.bitchat.android.R
  * Handles all Bluetooth and notification permissions required for the app to function
  */
 class PermissionManager(private val context: Context) {
+    private val textContext: Context
+        get() = ContextCompat.getContextForLanguage(context)
 
     companion object {
         private const val TAG = "PermissionManager"
@@ -241,10 +244,10 @@ class PermissionManager(private val context: Context) {
         categories.add(
             PermissionCategory(
                 type = PermissionType.NEARBY_DEVICES,
-                description = "Required to discover bitchat users via Bluetooth",
+                description = textContext.getString(R.string.permission_nearby_description),
                 permissions = bluetoothPermissions,
                 isGranted = bluetoothPermissions.all { isPermissionGranted(it) },
-                systemDescription = "Allow bitchat to connect to nearby devices"
+                systemDescription = textContext.getString(R.string.permission_nearby_system)
             )
         )
 
@@ -257,10 +260,10 @@ class PermissionManager(private val context: Context) {
             categories.add(
                 PermissionCategory(
                     type = PermissionType.PRECISE_LOCATION,
-                    description = "Required by Android 8–11 for Bluetooth discovery; online channels work without it",
+                    description = textContext.getString(R.string.permission_legacy_description),
                     permissions = locationPermissions,
                     isGranted = locationPermissions.all { isPermissionGranted(it) },
-                    systemDescription = "bitchat does not read device coordinates"
+                    systemDescription = textContext.getString(R.string.permission_legacy_system)
                 )
             )
         }
@@ -271,10 +274,10 @@ class PermissionManager(private val context: Context) {
             categories.add(
                 PermissionCategory(
                     type = PermissionType.WIFI_AWARE,
-                    description = "Enable Wi‑Fi Aware to discover and connect to nearby bitchat users over Wi‑Fi.",
+                    description = textContext.getString(R.string.permission_wifi_description),
                     permissions = wifiAwarePermissions,
                     isGranted = wifiAwarePermissions.all { isPermissionGranted(it) },
-                    systemDescription = "Allow bitchat to discover nearby Wi‑Fi devices"
+                    systemDescription = textContext.getString(R.string.permission_wifi_system)
                 )
             )
         }
@@ -284,10 +287,10 @@ class PermissionManager(private val context: Context) {
             categories.add(
                 PermissionCategory(
                     type = PermissionType.NOTIFICATIONS,
-                    description = "Receive notifications when you receive private messages",
+                    description = textContext.getString(R.string.permission_notifications_description),
                     permissions = listOf(Manifest.permission.POST_NOTIFICATIONS),
                     isGranted = isPermissionGranted(Manifest.permission.POST_NOTIFICATIONS),
-                    systemDescription = "Allow bitchat to send you notifications"
+                    systemDescription = textContext.getString(R.string.permission_notifications_system)
                 )
             )
         }
@@ -299,10 +302,10 @@ class PermissionManager(private val context: Context) {
             categories.add(
                 PermissionCategory(
                     type = PermissionType.BATTERY_OPTIMIZATION,
-                    description = "Disable battery optimization to ensure bitchat runs reliably in the background and maintains mesh network connections",
+                    description = textContext.getString(R.string.permission_battery_description),
                     permissions = listOf("BATTERY_OPTIMIZATION"), // Custom identifier
                     isGranted = isBatteryOptimizationDisabled(),
-                    systemDescription = "Allow bitchat to run without battery restrictions"
+                    systemDescription = textContext.getString(R.string.permission_battery_system)
                 )
             )
         }
@@ -359,13 +362,13 @@ data class PermissionCategory(
     val systemDescription: String
 )
 
-enum class PermissionType(val nameValue: String) {
-    NEARBY_DEVICES("Nearby Devices"),
-    PRECISE_LOCATION("Precise Location"),
-    BACKGROUND_LOCATION("Background Location"),
-    MICROPHONE("Microphone"),
-    NOTIFICATIONS("Notifications"),
-    WIFI_AWARE("Wi‑Fi Aware"),
-    BATTERY_OPTIMIZATION("Battery Optimization"),
-    OTHER("Other")
+enum class PermissionType(val nameValue: String, @StringRes val titleResource: Int) {
+    NEARBY_DEVICES("Nearby Devices", R.string.permission_nearby_title),
+    PRECISE_LOCATION("Precise Location", R.string.permission_location_title),
+    BACKGROUND_LOCATION("Background Location", R.string.permission_background_title),
+    MICROPHONE("Microphone", R.string.permission_microphone_title),
+    NOTIFICATIONS("Notifications", R.string.permission_notifications_title),
+    WIFI_AWARE("Wi‑Fi Aware", R.string.permission_wifi_title),
+    BATTERY_OPTIMIZATION("Battery Optimization", R.string.permission_battery_title),
+    OTHER("Other", R.string.permission_other_title)
 }

@@ -155,7 +155,7 @@ class IncomingMessageAdmissionTest {
         state.setNickname("me")
         val manager = PrivateChatManager(
             state = state,
-            messageManager = MessageManager(state),
+            messageManager = MessageManager(state, context),
             dataManager = DataManager(context),
             noiseSessionDelegate = testNoiseDelegate()
         )
@@ -191,7 +191,7 @@ class IncomingMessageAdmissionTest {
         state.setNickname("me")
         val manager = PrivateChatManager(
             state = state,
-            messageManager = MessageManager(state),
+            messageManager = MessageManager(state, context),
             dataManager = DataManager(context),
             noiseSessionDelegate = testNoiseDelegate()
         )
@@ -255,7 +255,7 @@ class IncomingMessageAdmissionTest {
         val state = ChatState(TestScope())
         val manager = PrivateChatManager(
             state = state,
-            messageManager = MessageManager(state),
+            messageManager = MessageManager(state, context),
             dataManager = DataManager(context),
             noiseSessionDelegate = testNoiseDelegate()
         )

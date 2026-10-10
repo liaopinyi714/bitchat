@@ -66,7 +66,7 @@ class MediaSendingManagerMigrationTest {
         whenever(mesh.getPeerNicknames()).thenReturn(mapOf(peerID to "old peer"))
         manager = MediaSendingManager(
             state,
-            MessageManager(state),
+            MessageManager(state, org.robolectric.RuntimeEnvironment.getApplication()),
             mock(),
             CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
             mediaWorkDispatcher = Dispatchers.Unconfined,
@@ -90,13 +90,13 @@ class MediaSendingManagerMigrationTest {
     @Test
     fun `preflight rejection creates only a visible failure and no file echo or send`() {
         whenever(mesh.prepareFilePrivate(eq(peerID), any(), any(), eq(false)))
-            .thenReturn(PrivateMediaPreparation.Rejected("too many fragments"))
+            .thenReturn(PrivateMediaPreparation.Rejected("File exceeds the private-media v1 limit of 256 final mesh fragments"))
 
         manager.sendImageNote(peerID, null, file.absolutePath)
 
         val messages = state.privateChats.value[peerID].orEmpty()
         assertEquals(1, messages.size)
-        assertTrue(messages.single().content.contains("too many fragments"))
+        assertTrue(messages.single().content.contains("256 final mesh fragments"))
         assertTrue(messages.none { it.type == com.bitchat.android.model.BitchatMessageType.Image })
         assertEquals(null, manager.legacyPrivateMediaConsent.value)
         verify(mesh, never()).sendFilePrivate(any(), any())
@@ -119,7 +119,7 @@ class MediaSendingManagerMigrationTest {
                 }
             val asynchronousManager = MediaSendingManager(
                 state,
-                MessageManager(state),
+                MessageManager(state, org.robolectric.RuntimeEnvironment.getApplication()),
                 mock(),
                 CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
                 mediaWorkDispatcher = dispatcher,

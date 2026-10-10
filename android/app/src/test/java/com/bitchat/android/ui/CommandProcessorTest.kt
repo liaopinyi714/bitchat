@@ -32,7 +32,7 @@ class CommandProcessorTest() {
   private val chatState = ChatState(scope = testScope)
   private lateinit var commandProcessor: CommandProcessor
 
-  val messageManager: MessageManager = MessageManager(state = chatState)
+  val messageManager: MessageManager = MessageManager(state = chatState, context = context)
   val channelManager: ChannelManager = ChannelManager(
     state = chatState,
     messageManager = messageManager,
@@ -157,7 +157,7 @@ class CommandProcessorTest() {
     )
 
     assertEquals(
-      "invalid cashu token — not sending it",
+      "Invalid Cashu token. Nothing was sent.",
       chatState.getChannelMessagesValue()["geo:$geohash"]?.single()?.content
     )
     assertEquals(0, chatState.getMessagesValue().size)

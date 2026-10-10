@@ -30,8 +30,8 @@ android {
         applicationId = "xyz.liaopinyi714.bitchat"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.1.2"
         buildConfigField("String", "RELAY_URL", "\"wss://chat.123456714.xyz\"")
         buildConfigField(
             "String",
@@ -50,6 +50,10 @@ android {
         includeInApk = false
         // Disables dependency metadata when building Android App Bundles.
         includeInBundle = false
+    }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
     }
 
     buildTypes {

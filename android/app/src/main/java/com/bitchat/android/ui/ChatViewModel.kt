@@ -141,7 +141,7 @@ class ChatViewModel(
     }
     private val conversationListPreferences =
         com.bitchat.android.services.ConversationListPreferences.getInstance(getApplication())
-    private val messageManager = MessageManager(state)
+    private val messageManager = MessageManager(state, application)
     private val channelManager = ChannelManager(state, messageManager, dataManager, viewModelScope)
 
     // Create Noise session delegate for clean dependency injection

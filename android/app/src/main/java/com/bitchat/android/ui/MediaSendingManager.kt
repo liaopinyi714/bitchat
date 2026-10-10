@@ -1,5 +1,6 @@
 package com.bitchat.android.ui
 
+import com.bitchat.android.R
 import android.util.Log
 import com.bitchat.android.mesh.MeshService
 import com.bitchat.android.model.BitchatFilePacket
@@ -98,7 +99,7 @@ class MediaSendingManager(
         Log.e(TAG, "❌ File too large: $size bytes (max: $MAX_FILE_SIZE)")
         val sizeMb = size / (1024 * 1024)
         val maxMb = MAX_FILE_SIZE / (1024 * 1024)
-        val text = "cannot send ${file.name}: file is too large (${sizeMb} MB, max $maxMb MB)"
+        val text = messageManager.getString(R.string.media_file_too_large, file.name, sizeMb, maxMb)
         when {
             toPeerIDOrNull != null -> {
                 val sys = BitchatMessage(
@@ -305,7 +306,7 @@ class MediaSendingManager(
             ?: run {
                 addPrivateMediaSystemMessage(
                     toPeerID,
-                    "Private media was not sent because this conversation has no active mesh route."
+                    messageManager.getString(R.string.media_no_route)
                 )
                 return
             }
@@ -323,7 +324,7 @@ class MediaSendingManager(
         if (!reserveAutomaticPending(pending)) {
             addPrivateMediaSystemMessage(
                 recipient.conversationID,
-                "Private media was not sent because another secure media send is still pending."
+                messageManager.getString(R.string.media_pending)
             )
             return
         }
@@ -356,7 +357,7 @@ class MediaSendingManager(
         if (!reserveAutomaticPending(automatic)) {
             addPrivateMediaSystemMessage(
                 pending.conversationID,
-                "Private media was not sent because another secure media send is still pending."
+                messageManager.getString(R.string.media_pending)
             )
             return
         }
@@ -464,7 +465,7 @@ class MediaSendingManager(
                     Log.w(TAG, "Legacy consent was consumed but policy still requested consent; send aborted")
                     addPrivateMediaSystemMessage(
                         pending.conversationID,
-                        "Private media was not sent because its security policy changed."
+                        messageManager.getString(R.string.media_policy_changed)
                     )
                     return
                 }
@@ -477,7 +478,7 @@ class MediaSendingManager(
                     requestId = UUID.randomUUID().toString(),
                     recipientNickname = nickname,
                     fileName = pending.filePacket.fileName,
-                    warning = preparation.warning
+                    warning = messageManager.getString(R.string.media_legacy_warning)
                 )
                 synchronized(pendingConsentLock) {
                     if (pendingPrivateMedia != null) {
@@ -517,10 +518,27 @@ class MediaSendingManager(
                 Log.w(TAG, "Private media not sent: ${preparation.reason}")
                 addPrivateMediaSystemMessage(
                     pending.conversationID,
-                    "Private media was not sent: ${preparation.reason}"
+                    localizedRejection(preparation.reason)
                 )
             }
         }
+    }
+
+    private fun localizedRejection(reason: String): String {
+        val detail = when (reason) {
+            "File exceeds the private-media v1 limit of 256 final mesh fragments" -> R.string.media_reason_fragment_limit
+            "Encrypted private media was previously pinned, but this session proved no support; send blocked" -> R.string.media_reason_downgrade
+            "Encrypted private media was previously pinned, but this session did not provide authenticated peer state" -> R.string.media_reason_peer_unverified
+            "Failed to encode private media" -> R.string.media_reason_encode
+            "The authenticated Noise session could not encrypt this file" -> R.string.media_reason_encrypt
+            "Could not sign the legacy private-media packet; nothing was sent",
+            "Could not sign the encrypted private-media packet; nothing was sent",
+            "Could not produce a valid Ed25519 private-media signature; nothing was sent" -> R.string.media_reason_signature
+            "Wi-Fi Aware transport is unavailable" -> R.string.media_reason_wifi_unavailable
+            "No local transport is available for this peer" -> R.string.media_reason_transport_unavailable
+            else -> return messageManager.getString(R.string.media_security_rejected)
+        }
+        return messageManager.getString(R.string.media_rejection_details, messageManager.getString(detail))
     }
 
     private fun reserveAutomaticPending(pending: PendingAutomaticPrivateMedia): Boolean =
@@ -557,7 +575,7 @@ class MediaSendingManager(
             if (expired) {
                 addPrivateMediaSystemMessage(
                     pending.conversationID,
-                    "Private media was not sent because secure session setup timed out."
+                    messageManager.getString(R.string.media_session_timeout)
                 )
             }
         }
@@ -634,7 +652,7 @@ class MediaSendingManager(
             Log.e(TAG, "Prepared private-media message could not be persisted; send aborted")
             addPrivateMediaSystemMessage(
                 conversationID,
-                "Private media was not sent because the conversation could not be saved."
+                messageManager.getString(R.string.media_save_failed)
             )
             return
         }
@@ -661,7 +679,7 @@ class MediaSendingManager(
             Log.w(TAG, "Prepared private-media commit failed; local echo marked failed")
             addPrivateMediaSystemMessage(
                 conversationID,
-                "Private media was not sent because the prepared transfer could not be committed."
+                messageManager.getString(R.string.media_commit_failed)
             )
             return
         }

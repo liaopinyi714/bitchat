@@ -544,8 +544,8 @@ fun AboutSheet(
 
                                     SettingsToggleRow(
                                         icon = Icons.Filled.Mic,
-                                        title = "Live push-to-talk",
-                                        subtitle = "Play voice bursts live on the mesh; voice notes are always sent on release",
+                                        title = stringResource(R.string.voice_live_title),
+                                        subtitle = stringResource(R.string.voice_live_description),
                                         checked = liveVoiceEnabled,
                                         onCheckedChange = { enabled ->
                                             liveVoiceEnabled = enabled

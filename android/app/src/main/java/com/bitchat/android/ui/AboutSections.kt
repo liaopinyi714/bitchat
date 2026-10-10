@@ -208,7 +208,7 @@ internal fun AboutHero(
         Spacer(modifier = Modifier.height(4.dp))
 
         Text(
-            text = "named channels · Cloudflare fork",
+            text = stringResource(R.string.about_fork_label),
             fontFamily = BitchatFontFamily,
             fontSize = 16.sp,
             color = colorScheme.onSurfaceVariant

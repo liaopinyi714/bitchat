@@ -72,7 +72,7 @@ fun AudioMessageItem(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (isLive) {
                     androidx.compose.material3.Text(
-                        text = "LIVE",
+                        text = stringResource(R.string.voice_live_badge),
                         color = Color(0xFFFFB300),
                         style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
                         modifier = Modifier.padding(end = 8.dp)
@@ -137,7 +137,7 @@ fun AudioMessageItem(
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (isLive) {
                 androidx.compose.material3.Text(
-                    text = "LIVE",
+                    text = stringResource(R.string.voice_live_badge),
                     color = Color(0xFFFFB300),
                     style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
                     modifier = Modifier.padding(end = 8.dp)

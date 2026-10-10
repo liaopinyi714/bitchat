@@ -1,5 +1,8 @@
 package com.bitchat.android.ui
 
+import android.content.Context
+import androidx.annotation.StringRes
+import androidx.core.content.ContextCompat
 import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.model.DeliveryStatus
 import com.bitchat.android.services.ContactDirectory
@@ -9,7 +12,9 @@ import java.util.Collections
 /**
  * Handles all message-related operations including deduplication and organization
  */
-class MessageManager(private val state: ChatState) {
+class MessageManager(private val state: ChatState, private val context: Context) {
+    fun getString(@StringRes resource: Int, vararg arguments: Any): String =
+        ContextCompat.getContextForLanguage(context).getString(resource, *arguments)
     
     // Message deduplication for duplicate deliveries from multiple local transports.
     private val processedUIMessages = Collections.synchronizedSet(mutableSetOf<String>())

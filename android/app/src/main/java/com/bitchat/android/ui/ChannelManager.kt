@@ -1,5 +1,6 @@
 package com.bitchat.android.ui
 
+import com.bitchat.android.R
 import com.bitchat.android.cloudflare.TopicPayload
 import com.bitchat.android.cloudflare.TopicRelayState
 import com.bitchat.android.model.BitchatMessage
@@ -24,7 +25,7 @@ class ChannelManager(
 
     fun joinChannel(channel: String, password: String? = null, myPeerID: String): Boolean {
         val name = runCatching { TopicPayload.normalize(channel) }.getOrElse {
-            messageManager.addSystemMessage("Invalid channel name"); return false
+            messageManager.addSystemMessage(messageManager.getString(R.string.topic_invalid_name)); return false
         }
         if (password != null) {
             if (!pending.add(name)) return false
@@ -34,14 +35,14 @@ class ChannelManager(
                     val key = withContext(Dispatchers.Default) { TopicPayload.derive(password, name) }
                     if (expectedEpoch != epoch) return@launch
                     if (!TopicPayload.setKey(name, key)) {
-                        messageManager.addSystemMessage("Incorrect channel password")
+                        messageManager.addSystemMessage(messageManager.getString(R.string.topic_incorrect_password))
                         prompt(name)
                     } else {
                         state.setPasswordProtectedChannels(state.getPasswordProtectedChannelsValue() + name)
                         hidePasswordPrompt()
                         joinChannel(name, null, myPeerID)
                     }
-                } catch (_: Exception) { messageManager.addSystemMessage("Unable to unlock channel"); prompt(name) }
+                } catch (_: Exception) { messageManager.addSystemMessage(messageManager.getString(R.string.topic_unlock_failed)); prompt(name) }
                 finally { pending.remove(name) }
             }
             return true
@@ -120,7 +121,7 @@ class ChannelManager(
                 state.setPasswordProtectedChannels(state.getPasswordProtectedChannelsValue() + channel)
                 saveChannelData()
                 if (!onProtect(channel)) onJoin(channel)
-            } catch (_: Exception) { messageManager.addSystemMessage("Unable to protect channel") }
+            } catch (_: Exception) { messageManager.addSystemMessage(messageManager.getString(R.string.topic_protect_failed)) }
             finally { pending.remove(channel) }
         }
     }

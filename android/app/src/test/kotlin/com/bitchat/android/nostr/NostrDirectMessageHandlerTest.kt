@@ -74,7 +74,7 @@ class NostrDirectMessageHandlerTest {
         val application = RuntimeEnvironment.getApplication()
         val state = ChatState(scope).apply { setNickname("recipient") }
         val dataManager = DataManager(application)
-        val messageManager = MessageManager(state)
+        val messageManager = MessageManager(state, application)
         val privateChatManager = PrivateChatManager(
             state = state,
             messageManager = messageManager,

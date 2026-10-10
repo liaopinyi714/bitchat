@@ -39,7 +39,7 @@ class MeshDelegateHandlerStateContractTest {
         val scope = TestScope(UnconfinedTestDispatcher())
         state = ChatState(scope)
         state.setNickname("Résumé")
-        messages = MessageManager(state)
+        messages = MessageManager(state, mock())
         channels = mock()
         privateChats = mock()
         notifications = mock()

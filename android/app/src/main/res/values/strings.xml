@@ -152,7 +152,7 @@
   <string name="cd_pick_file">Pick file</string>
 
   <!-- About sheet -->
-  <string name="about_tagline">The sidegroup chat</string>
+  <string name="about_tagline">Local mesh and named online channels</string>
 
   <!-- About sheet: tabs -->
   <string name="about_tab_info">Info</string>
@@ -174,8 +174,8 @@
   <string name="about_section_settings">Settings</string>
 
   <!-- About sheet: feature list -->
-  <string name="about_no_tracking_title">No Tracking</string>
-  <string name="about_no_tracking_desc">No servers, accounts, or data collection.</string>
+  <string name="about_no_tracking_title">No Registration</string>
+  <string name="about_no_tracking_desc">No account required. Online channels send messages through a relay service.</string>
   <string name="about_ephemeral_title">Ephemeral Identity</string>
   <string name="about_ephemeral_desc">A new peer ID is generated regularly.</string>
   <string name="about_panic_desc">Triple-tap the logo to instantly clear all data.</string>
@@ -371,8 +371,8 @@
   <string name="image_unavailable">Image unavailable</string>
   <string name="image_saved_to_downloads">Image saved to Downloads</string>
   <string name="image_save_failed">Failed to save image</string>
-  <string name="file_save_success" translatable="false">File saved</string>
-  <string name="file_save_failure" translatable="false">Failed to save file</string>
+  <string name="file_save_success">File saved</string>
+  <string name="file_save_failure">Failed to save file</string>
   <string name="pick_file">Pick file</string>
   <string name="file_unavailable">[file unavailable]</string>
   <string name="unknown">Unknown</string>
