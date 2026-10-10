@@ -210,7 +210,7 @@ object WifiAwareController {
             true
         } else {
             val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
-            lm?.isLocationEnabled == true
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) lm?.isLocationEnabled == true else false
         }
 
         if (!locationEnabled) {
