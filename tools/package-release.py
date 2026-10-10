@@ -58,10 +58,10 @@ def main():
         "physicalDeviceAcceptance": "pending", "artifacts": apks,
     }
     info = args.output_dir / "BUILDINFO.json"
-    info.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+    info.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8", newline="\n")
     entries = [f"{item['sha256']}  {item['file']}" for item in apks]
     entries.append(f"{sha256(info)}  {info.name}")
-    (args.output_dir / "SHA256SUMS").write_text("\n".join(entries) + "\n", encoding="utf-8")
+    (args.output_dir / "SHA256SUMS").write_text("\n".join(entries) + "\n", encoding="utf-8", newline="\n")
     print("Prepared two signed APKs, BUILDINFO.json and SHA256SUMS. No private signing files included.")
 
 
