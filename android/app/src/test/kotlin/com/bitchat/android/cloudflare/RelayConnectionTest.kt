@@ -118,4 +118,16 @@ class RelayConnectionTest {
         verify(sessions.first().first, never()).send(any<String>())
         assertTrue(statuses.contains("protocol_error"))
     }
+
+    @Test fun `stopping during backoff discards the old retry generation`() {
+        connection.start()
+        sessions.first().second.onClosed(sessions.first().first, 1000, "closed")
+        scope.runCurrent()
+        connection.stop()
+        connection.start()
+        scope.advanceTimeBy(2000)
+        scope.runCurrent()
+        assertEquals(2, sessions.size)
+        assertFalse(connection.ready)
+    }
 }

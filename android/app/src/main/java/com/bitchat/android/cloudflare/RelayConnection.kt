@@ -156,7 +156,14 @@ class RelayConnection(
         ready = false; onStatus("disconnected")
         val waitMs = (1000L shl attempts.coerceAtMost(6)).coerceAtMost(60_000L)
         attempts++
-        retry = scope.launch { delay(waitMs + kotlin.random.Random.nextLong(0, 500)); retry = null; connect() }
+        retry = scope.launch {
+            delay(waitMs + kotlin.random.Random.nextLong(0, 500))
+            synchronized(this@RelayConnection) {
+                if (current != generation || !running.get()) return@launch
+                retry = null
+                connect()
+            }
+        }
     }
 
     @Synchronized fun send(packet: BitchatPacket, target: String? = null, historical: Boolean = false): Boolean {
