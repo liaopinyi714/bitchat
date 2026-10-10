@@ -636,11 +636,6 @@ class ChatViewModel(
         verificationHandler.loadVerifiedFingerprints()
 
 
-        // Ensure NostrTransport knows our mesh peer ID for embedded packets
-        try {
-            val nostrTransport = com.bitchat.android.nostr.NostrTransport.getInstance(getApplication())
-            nostrTransport.senderPeerID = mesh.myPeerID
-        } catch (_: Exception) { }
 
         // Note: Mesh service is now started by MainActivity
 
@@ -1642,7 +1637,8 @@ class ChatViewModel(
     }
 
     fun selectLocationChannel(channel: com.bitchat.android.geohash.ChannelID) {
-        geohashViewModel.selectLocationChannel(channel)
+        // Geographic routes are disabled, including stale notifications from older builds.
+        state.setSelectedLocationChannel(com.bitchat.android.geohash.ChannelID.Mesh)
     }
 
     /**

@@ -567,8 +567,6 @@ fun PeerCounter(
     joinedChannels: Set<String>,
     hasUnreadChannels: Map<String, Int>,
     isConnected: Boolean,
-    selectedLocationChannel: com.bitchat.android.geohash.ChannelID?,
-    geohashPeople: List<GeoPerson>,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     showJoinedChannelCount: Boolean = true
@@ -576,20 +574,8 @@ fun PeerCounter(
     val palette = LocalBitchatPalette.current
     val colorScheme = MaterialTheme.colorScheme
 
-    // Compute channel-aware people count and color (matches iOS logic exactly)
-    val (peopleCount, countColor) = when (selectedLocationChannel) {
-        is com.bitchat.android.geohash.ChannelID.Location -> {
-            // Geohash channel: show geohash participants
-            val count = geohashPeople.size
-            Pair(count, if (count > 0) colorScheme.primary else palette.textTertiary)
-        }
-        is com.bitchat.android.geohash.ChannelID.Mesh,
-        null -> {
-            // Mesh channel: show Bluetooth-connected peers (excluding self)
-            val count = connectedPeers.size
-            Pair(count, if (isConnected && count > 0) colorScheme.secondary else palette.textTertiary)
-        }
-    }
+    val peopleCount = connectedPeers.size
+    val countColor = if (isConnected && peopleCount > 0) colorScheme.secondary else palette.textTertiary
 
     // Peers come and go constantly; fading the tint avoids a flicker every time the count
     // crosses zero.
@@ -612,10 +598,7 @@ fun PeerCounter(
             // The extracted people glyph stays legible at the compact header scale; the number
             // beside it carries the precise count.
             painter = painterResource(R.drawable.ic_spec_people),
-            contentDescription = when (selectedLocationChannel) {
-                is com.bitchat.android.geohash.ChannelID.Location -> stringResource(R.string.cd_geohash_participants)
-                else -> stringResource(R.string.cd_connected_peers)
-            },
+            contentDescription = stringResource(R.string.cd_connected_peers),
             modifier = Modifier.size(HeaderIconSize),
             tint = animatedCountColor
         )
@@ -700,7 +683,7 @@ private fun ChannelHeader(
         leadingIconRes = R.drawable.ic_spec_chat_bubbles,
         leadingIconTint = colorScheme.primary,
         leadingContentDescription = null,
-        title = "#$channel",
+        title = channel,
         onTitleClick = onSidebarClick
     ) {
         CloseButton(onClick = onBackClick)
@@ -725,8 +708,6 @@ private fun MainHeader(
     val hasUnreadChannels by viewModel.unreadChannelMessages.collectAsStateWithLifecycle()
     val hasUnreadPrivateMessages by viewModel.unreadPrivateMessages.collectAsStateWithLifecycle()
     val isConnected by viewModel.isConnected.collectAsStateWithLifecycle()
-    val selectedLocationChannel by viewModel.selectedLocationChannel.collectAsStateWithLifecycle()
-    val geohashPeople by viewModel.geohashPeople.collectAsStateWithLifecycle()
 
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val crowdingMode = headerCrowdingMode(maxWidth)
@@ -795,8 +776,6 @@ private fun MainHeader(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(0.dp)
                 ) {
-
-
                     LocationChannelsButton(
                         viewModel = viewModel,
                         onClick = onLocationChannelsClick,
@@ -809,8 +788,6 @@ private fun MainHeader(
                     joinedChannels = joinedChannels,
                     hasUnreadChannels = hasUnreadChannels,
                     isConnected = isConnected,
-                    selectedLocationChannel = selectedLocationChannel,
-                    geohashPeople = geohashPeople,
                     onClick = onSidebarClick,
                     showJoinedChannelCount = crowdingMode == HeaderCrowdingMode.Full
                 )
@@ -820,7 +797,7 @@ private fun MainHeader(
 }
 
 /**
- * Current channel indicator: a globe for geohash channels, a mesh glyph for the local mesh.
+ * Upstream channel indicator: a globe for named channels, a mesh glyph for the local mesh.
  *
  * The design brief asked for the "addition of globe icon to represent channels". Previously this
  * was a text-only badge wrapped in an M3 [Button], which imposed a hidden 58.dp minimum width
@@ -834,29 +811,13 @@ private fun LocationChannelsButton(
 ) {
     val colorScheme = MaterialTheme.colorScheme
 
-    // Get current channel selection from location manager
-    val selectedChannel by viewModel.selectedLocationChannel.collectAsStateWithLifecycle()
-
-    val isLocation = selectedChannel is com.bitchat.android.geohash.ChannelID.Location
-    val badgeText = "channels"
-    val channelColor = if (isLocation) colorScheme.primary else colorScheme.secondary
-    // Tor status only tints the globe (location channels). The local mesh stays blue.
-    val torVisual = if (isLocation) {
-        rememberTorConnectionVisual(normal = channelColor)
-    } else {
-        TorConnectionVisual(tint = channelColor, isProgress = false)
-    }
-    val badgeIconRes = if (isLocation) {
-        R.drawable.ic_spec_globe
-    } else {
-        R.drawable.ic_spec_range
-    }
-    val actionDescription = "Open channels"
-    val contentDescription = locationChannelContentDescription(
-        actionDescription = actionDescription,
-        channelLabel = badgeText,
-        showLabel = showLabel
-    )
+    val currentChannel by viewModel.currentChannel.collectAsStateWithLifecycle()
+    val badgeText = currentChannel ?: stringResource(R.string.mesh_label)
+    val channelColor = if (currentChannel != null) colorScheme.primary else colorScheme.secondary
+    val torVisual = TorConnectionVisual(tint = channelColor, isProgress = false)
+    val badgeIconRes = if (currentChannel != null) R.drawable.ic_spec_globe else R.drawable.ic_spec_range
+    val actionDescription = stringResource(R.string.topic_channels_title)
+    val contentDescription = locationChannelContentDescription(actionDescription, badgeText, showLabel)
 
     Row(
         verticalAlignment = Alignment.CenterVertically,

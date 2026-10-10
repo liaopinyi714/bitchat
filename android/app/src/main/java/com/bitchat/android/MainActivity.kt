@@ -21,7 +21,6 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.Lifecycle
 import com.bitchat.android.mesh.BluetoothMeshService
 import com.bitchat.android.mesh.MeshService
-import com.bitchat.android.geohash.LocationChannelManager
 import com.bitchat.android.onboarding.BluetoothCheckScreen
 import com.bitchat.android.onboarding.BluetoothStatus
 import com.bitchat.android.onboarding.BluetoothStatusManager
@@ -29,12 +28,8 @@ import com.bitchat.android.onboarding.BatteryOptimizationManager
 import com.bitchat.android.onboarding.BatteryOptimizationPreferenceManager
 import com.bitchat.android.onboarding.BatteryOptimizationScreen
 import com.bitchat.android.onboarding.BatteryOptimizationStatus
-import com.bitchat.android.onboarding.BackgroundLocationPermissionScreen
 import com.bitchat.android.onboarding.InitializationErrorScreen
 import com.bitchat.android.onboarding.InitializingScreen
-import com.bitchat.android.onboarding.LocationCheckScreen
-import com.bitchat.android.onboarding.LocationStatus
-import com.bitchat.android.onboarding.LocationStatusManager
 import com.bitchat.android.onboarding.OnboardingCoordinator
 import com.bitchat.android.onboarding.OnboardingState
 import com.bitchat.android.onboarding.PermissionExplanationScreen
@@ -54,7 +49,6 @@ class MainActivity : OrientationAwareActivity() {
     private lateinit var permissionManager: PermissionManager
     private lateinit var onboardingCoordinator: OnboardingCoordinator
     private lateinit var bluetoothStatusManager: BluetoothStatusManager
-    private lateinit var locationStatusManager: LocationStatusManager
     private lateinit var batteryOptimizationManager: BatteryOptimizationManager
     
     // Core mesh service - provided by the foreground service holder
@@ -123,12 +117,6 @@ class MainActivity : OrientationAwareActivity() {
             onBluetoothEnabled = ::handleBluetoothEnabled,
             onBluetoothDisabled = ::handleBluetoothDisabled
         )
-        locationStatusManager = LocationStatusManager(
-            activity = this,
-            context = this,
-            onLocationEnabled = ::handleLocationEnabled,
-            onLocationDisabled = ::handleLocationDisabled
-        )
         batteryOptimizationManager = BatteryOptimizationManager(
             activity = this,
             context = this,
@@ -139,9 +127,6 @@ class MainActivity : OrientationAwareActivity() {
             activity = this,
             permissionManager = permissionManager,
             onOnboardingComplete = ::handleOnboardingComplete,
-            onBackgroundLocationRequired = {
-                mainViewModel.updateOnboardingState(OnboardingState.BACKGROUND_LOCATION_EXPLANATION)
-            },
             onOnboardingFailed = ::handleOnboardingFailed
         )
         
@@ -191,11 +176,9 @@ class MainActivity : OrientationAwareActivity() {
         val context = LocalContext.current
         val onboardingState by mainViewModel.onboardingState.collectAsState()
         val bluetoothStatus by mainViewModel.bluetoothStatus.collectAsState()
-        val locationStatus by mainViewModel.locationStatus.collectAsState()
         val batteryOptimizationStatus by mainViewModel.batteryOptimizationStatus.collectAsState()
         val errorMessage by mainViewModel.errorMessage.collectAsState()
         val isBluetoothLoading by mainViewModel.isBluetoothLoading.collectAsState()
-        val isLocationLoading by mainViewModel.isLocationLoading.collectAsState()
         val isBatteryOptimizationLoading by mainViewModel.isBatteryOptimizationLoading.collectAsState()
 
         DisposableEffect(context, bluetoothStatusManager) {
@@ -243,21 +226,6 @@ class MainActivity : OrientationAwareActivity() {
                 )
             }
             
-            OnboardingState.LOCATION_CHECK -> {
-                LocationCheckScreen(
-                    modifier = modifier,
-                    status = locationStatus,
-                    onEnableLocation = {
-                        mainViewModel.updateLocationLoading(true)
-                        locationStatusManager.requestEnableLocation()
-                    },
-                    onRetry = {
-                        checkLocationAndProceed()
-                    },
-                    isLoading = isLocationLoading
-                )
-            }
-            
             OnboardingState.BATTERY_OPTIMIZATION_CHECK -> {
                 BatteryOptimizationScreen(
                     modifier = modifier,
@@ -281,6 +249,7 @@ class MainActivity : OrientationAwareActivity() {
                 PermissionExplanationScreen(
                     modifier = modifier,
                     permissionCategories = permissionManager.getCategorizedPermissions(),
+                    onSkip = { onboardingCoordinator.skipLocalDiscovery() },
                     onContinue = {
                         mainViewModel.updateOnboardingState(OnboardingState.PERMISSION_REQUESTING)
                         onboardingCoordinator.requestPermissions()
@@ -288,21 +257,7 @@ class MainActivity : OrientationAwareActivity() {
                 )
             }
 
-            OnboardingState.BACKGROUND_LOCATION_EXPLANATION -> {
-                BackgroundLocationPermissionScreen(
-                    modifier = modifier,
-                    onContinue = {
-                        onboardingCoordinator.requestBackgroundLocation()
-                    },
-                    onRetry = {
-                        onboardingCoordinator.checkBackgroundLocationAndProceed()
-                    },
-                    onSkip = {
-                        onboardingCoordinator.skipBackgroundLocation()
-                    }
-                )
-            }
-
+            OnboardingState.LOCATION_CHECK, OnboardingState.BACKGROUND_LOCATION_EXPLANATION,
             OnboardingState.CHECKING, OnboardingState.INITIALIZING, OnboardingState.COMPLETE -> {
                 // Set up back navigation handling for the chat screen
                 val backCallback = object : OnBackPressedCallback(true) {
@@ -359,7 +314,7 @@ class MainActivity : OrientationAwareActivity() {
             // Small delay to show the checking state
             delay(500)
             
-            // First check Bluetooth status (always required)
+            // Offer optional local discovery permissions on first launch.
             checkBluetoothAndProceed()
         }
     }
@@ -368,46 +323,8 @@ class MainActivity : OrientationAwareActivity() {
      * Check Bluetooth status and proceed with onboarding flow
      */
     private fun checkBluetoothAndProceed() {
-        // Check if user has skipped Bluetooth check for this session
-        if (mainViewModel.isBluetoothCheckSkipped.value) {
-            checkLocationAndProceed()
-            return
-        }
-
-        // For first-time users, skip Bluetooth check and go straight to permissions
-        // We'll check Bluetooth after permissions are granted
-        if (permissionManager.isFirstTimeLaunch()) {
-            proceedWithPermissionCheck()
-            return
-        }
-        
-        // For existing users, check Bluetooth status first
-        bluetoothStatusManager.logBluetoothStatus()
-        mainViewModel.updateBluetoothStatus(bluetoothStatusManager.checkBluetoothStatus())
-        
-        val bleRequired = try { com.bitchat.android.ui.debug.DebugPreferenceManager.getBleEnabled(true) } catch (_: Exception) { true }
-        if (!bleRequired) {
-            // Skip BLE checks entirely when BLE is disabled in debug settings
-            checkLocationAndProceed()
-            return
-        }
-        when (mainViewModel.bluetoothStatus.value) {
-            BluetoothStatus.ENABLED -> {
-                // Bluetooth is enabled, check location services next
-                checkLocationAndProceed()
-            }
-            BluetoothStatus.DISABLED -> {
-                // Show Bluetooth enable screen (should have permissions as existing user)
-                mainViewModel.updateOnboardingState(OnboardingState.BLUETOOTH_CHECK)
-                mainViewModel.updateBluetoothLoading(false)
-            }
-            BluetoothStatus.NOT_SUPPORTED -> {
-                // Device doesn't support Bluetooth
-                android.util.Log.e("MainActivity", "Bluetooth not supported")
-                mainViewModel.updateOnboardingState(OnboardingState.BLUETOOTH_CHECK)
-                mainViewModel.updateBluetoothLoading(false)
-            }
-        }
+        // Local radio discovery is optional; opening an online channel must never require GPS.
+        proceedWithPermissionCheck()
     }
     
     /**
@@ -421,18 +338,9 @@ class MainActivity : OrientationAwareActivity() {
                 mainViewModel.updateOnboardingState(OnboardingState.PERMISSION_EXPLANATION)
             } else if (permissionManager.getUnrequestedOptionalPermissions().isNotEmpty()) {
                 mainViewModel.updateOnboardingState(OnboardingState.PERMISSION_EXPLANATION)
-            } else if (permissionManager.areRequiredPermissionsGranted()) {
-                if (permissionManager.needsBackgroundLocationPermission() &&
-                    !permissionManager.isBackgroundLocationGranted() &&
-                    !com.bitchat.android.onboarding.BackgroundLocationPreferenceManager.isSkipped(this@MainActivity)
-                ) {
-                    mainViewModel.updateOnboardingState(OnboardingState.BACKGROUND_LOCATION_EXPLANATION)
-                } else {
-                    mainViewModel.updateOnboardingState(OnboardingState.INITIALIZING)
-                    initializeApp()
-                }
             } else {
-                mainViewModel.updateOnboardingState(OnboardingState.PERMISSION_EXPLANATION)
+                mainViewModel.updateOnboardingState(OnboardingState.INITIALIZING)
+                initializeApp()
             }
         }
     }
@@ -450,68 +358,9 @@ class MainActivity : OrientationAwareActivity() {
      * Check Location services status and proceed with onboarding flow
      */
     private fun checkLocationAndProceed() {
-        // For first-time users, skip location check and go straight to permissions
-        // We'll check location after permissions are granted
-        if (permissionManager.isFirstTimeLaunch()) {
-            proceedWithPermissionCheck()
-            return
-        }
-        
-        // For existing users, check location status
-        locationStatusManager.logLocationStatus()
-        mainViewModel.updateLocationStatus(locationStatusManager.checkLocationStatus())
-        
-        when (mainViewModel.locationStatus.value) {
-            LocationStatus.ENABLED -> {
-                // Location services enabled, check battery optimization next
-                checkBatteryOptimizationAndProceed()
-            }
-            LocationStatus.DISABLED -> {
-                // Show location enable screen (should have permissions as existing user)
-                mainViewModel.updateOnboardingState(OnboardingState.LOCATION_CHECK)
-                mainViewModel.updateLocationLoading(false)
-            }
-            LocationStatus.NOT_AVAILABLE -> {
-                // Device doesn't support location services (very unusual)
-                Log.e("MainActivity", "Location services not available")
-                mainViewModel.updateOnboardingState(OnboardingState.LOCATION_CHECK)
-                mainViewModel.updateLocationLoading(false)
-            }
-        }
-    }
-
-    /**
-     * Handle Location enabled callback
-     */
-    private fun handleLocationEnabled() {
-        mainViewModel.updateLocationLoading(false)
-        mainViewModel.updateLocationStatus(LocationStatus.ENABLED)
-        // Ensure Wi-Fi Aware starts now that location is enabled
-        com.bitchat.android.wifiaware.WifiAwareController.startIfPossible()
         checkBatteryOptimizationAndProceed()
     }
 
-    /**
-     * Handle Location disabled callback
-     */
-    private fun handleLocationDisabled(message: String) {
-        Log.w("MainActivity", "Location services disabled or failed: $message")
-        mainViewModel.updateLocationLoading(false)
-        mainViewModel.updateLocationStatus(locationStatusManager.checkLocationStatus())
-
-        when {
-            mainViewModel.locationStatus.value == LocationStatus.NOT_AVAILABLE -> {
-                // Show permanent error for devices without location services
-                mainViewModel.updateErrorMessage(message)
-                mainViewModel.updateOnboardingState(OnboardingState.ERROR)
-            }
-            else -> {
-                // Stay on location check screen for retry
-                mainViewModel.updateOnboardingState(OnboardingState.LOCATION_CHECK)
-            }
-        }
-    }
-    
     /**
      * Handle Bluetooth disabled callback
      */
@@ -543,41 +392,7 @@ class MainActivity : OrientationAwareActivity() {
     }
     
     private fun handleOnboardingComplete() {
-        // After permissions are granted, re-check Bluetooth, Location, and Battery Optimization status
-        val currentBluetoothStatus = bluetoothStatusManager.checkBluetoothStatus()
-        val currentLocationStatus = locationStatusManager.checkLocationStatus()
-        val currentBatteryOptimizationStatus = when {
-            !batteryOptimizationManager.isBatteryOptimizationSupported() -> BatteryOptimizationStatus.NOT_SUPPORTED
-            batteryOptimizationManager.isBatteryOptimizationDisabled() -> BatteryOptimizationStatus.DISABLED
-            else -> BatteryOptimizationStatus.ENABLED
-        }
-        
-        val bleRequired2 = try { com.bitchat.android.ui.debug.DebugPreferenceManager.getBleEnabled(true) } catch (_: Exception) { true }
-        when {
-            bleRequired2 && currentBluetoothStatus != BluetoothStatus.ENABLED -> {
-                // Bluetooth still disabled, but now we have permissions to enable it
-                mainViewModel.updateBluetoothStatus(currentBluetoothStatus)
-                mainViewModel.updateOnboardingState(OnboardingState.BLUETOOTH_CHECK)
-                mainViewModel.updateBluetoothLoading(false)
-            }
-            currentLocationStatus != LocationStatus.ENABLED -> {
-                // Location services still disabled, but now we have permissions to enable it
-                mainViewModel.updateLocationStatus(currentLocationStatus)
-                mainViewModel.updateOnboardingState(OnboardingState.LOCATION_CHECK)
-                mainViewModel.updateLocationLoading(false)
-            }
-            currentBatteryOptimizationStatus == BatteryOptimizationStatus.ENABLED -> {
-                // Battery optimization still enabled, show battery optimization screen
-                mainViewModel.updateBatteryOptimizationStatus(currentBatteryOptimizationStatus)
-                mainViewModel.updateOnboardingState(OnboardingState.BATTERY_OPTIMIZATION_CHECK)
-                mainViewModel.updateBatteryOptimizationLoading(false)
-            }
-            else -> {
-                // Both are enabled, proceed to app initialization
-                mainViewModel.updateOnboardingState(OnboardingState.INITIALIZING)
-                initializeApp()
-            }
-        }
+        checkBatteryOptimizationAndProceed()
     }
     
     private fun handleOnboardingFailed(message: String) {
@@ -677,17 +492,6 @@ class MainActivity : OrientationAwareActivity() {
                 // Initialize PoW preferences early in the initialization process
                 PoWPreferenceManager.init(this@MainActivity)
                 
-                // Initialize Location Notes Manager (extracted to separate file)
-                com.bitchat.android.nostr.LocationNotesInitializer.initialize(this@MainActivity)
-                
-                // Ensure all permissions are still granted (user might have revoked in settings)
-                if (!permissionManager.areAllPermissionsGranted()) {
-                    val missing = permissionManager.getMissingPermissions()
-                    Log.w("MainActivity", "Permissions revoked during initialization: $missing")
-                    handleOnboardingFailed("Some permissions were revoked. Please grant all permissions to continue.")
-                    return@launch
-                }
-
                 // Set up unified mesh delegate and start enabled transports
                 unifiedMeshService.delegate = chatViewModel
                 unifiedMeshService.startServices()
@@ -745,28 +549,13 @@ class MainActivity : OrientationAwareActivity() {
             // Reattach mesh delegate to new ChatViewModel instance after Activity recreation
             try { unifiedMeshService.delegate = chatViewModel } catch (_: Exception) { }
 
-            // Check if Bluetooth was disabled while app was backgrounded
-            val currentBluetoothStatus = bluetoothStatusManager.checkBluetoothStatus()
-            val bleRequired = try { com.bitchat.android.ui.debug.DebugPreferenceManager.getBleEnabled(true) } catch (_: Exception) { true }
-            if (bleRequired && currentBluetoothStatus != BluetoothStatus.ENABLED && !mainViewModel.isBluetoothCheckSkipped.value) {
-                Log.w("MainActivity", "Bluetooth disabled while app was backgrounded")
-                mainViewModel.updateBluetoothStatus(currentBluetoothStatus)
-                mainViewModel.updateOnboardingState(OnboardingState.BLUETOOTH_CHECK)
-                mainViewModel.updateBluetoothLoading(false)
-                return
+            // Permission or radio changes only affect local discovery.
+            // Online channel access is independent of device location.
+            if (com.bitchat.android.mesh.BluetoothPermissionManager(this).hasBluetoothPermissions()) {
+                meshService.startServices()
+                startMeshForegroundServiceBestEffort()
             }
-            
-            // Check if location services were disabled while app was backgrounded
-            val currentLocationStatus = locationStatusManager.checkLocationStatus()
-            if (currentLocationStatus != LocationStatus.ENABLED) {
-                Log.w("MainActivity", "Location services disabled while app was backgrounded")
-                mainViewModel.updateLocationStatus(currentLocationStatus)
-                mainViewModel.updateOnboardingState(OnboardingState.LOCATION_CHECK)
-                mainViewModel.updateLocationLoading(false)
-            } else {
-                // If location is enabled, ensure Wi-Fi Aware starts if it was blocked by location earlier
-                com.bitchat.android.wifiaware.WifiAwareController.startIfPossible()
-            }
+            com.bitchat.android.wifiaware.WifiAwareController.startIfPossible()
         }
     }
     
@@ -780,16 +569,11 @@ class MainActivity : OrientationAwareActivity() {
     }
     
     /**
-     * Handle intents from notification clicks - open specific private chat or geohash chat
+     * Handle intents from notification clicks - open specific private chat
      */
     private fun handleNotificationIntent(intent: Intent) {
         val shouldOpenPrivateChat = intent.getBooleanExtra(
             com.bitchat.android.ui.NotificationManager.EXTRA_OPEN_PRIVATE_CHAT, 
-            false
-        )
-        
-        val shouldOpenGeohashChat = intent.getBooleanExtra(
-            com.bitchat.android.ui.NotificationManager.EXTRA_OPEN_GEOHASH_CHAT,
             false
         )
         
@@ -810,32 +594,6 @@ class MainActivity : OrientationAwareActivity() {
                 }
             }
             
-            shouldOpenGeohashChat -> {
-                val geohash = intent.getStringExtra(com.bitchat.android.ui.NotificationManager.EXTRA_GEOHASH)
-                
-                if (geohash != null) {
-                    Log.d("MainActivity", "Opening geohash chat from notification")
-                    
-                    // Switch to the geohash channel - create appropriate geohash channel level
-                    val level = when (geohash.length) {
-                        7 -> com.bitchat.android.geohash.GeohashChannelLevel.BLOCK
-                        6 -> com.bitchat.android.geohash.GeohashChannelLevel.NEIGHBORHOOD
-                        5 -> com.bitchat.android.geohash.GeohashChannelLevel.CITY
-                        4 -> com.bitchat.android.geohash.GeohashChannelLevel.PROVINCE
-                        2 -> com.bitchat.android.geohash.GeohashChannelLevel.REGION
-                        else -> com.bitchat.android.geohash.GeohashChannelLevel.CITY // Default fallback
-                    }
-                    val geohashChannel = com.bitchat.android.geohash.GeohashChannel(level, geohash)
-                    val channelId = com.bitchat.android.geohash.ChannelID.Location(geohashChannel)
-                    chatViewModel.selectLocationChannel(channelId)
-                    
-                    // Update current geohash state for notifications
-                    chatViewModel.setCurrentGeohash(geohash)
-                    
-                    // Clear notifications for this geohash since user is now viewing it
-                    chatViewModel.clearNotificationsForGeohash(geohash)
-                }
-            }
         }
     }
 
@@ -855,13 +613,6 @@ class MainActivity : OrientationAwareActivity() {
         super.onDestroy()
         
         try { unregisterReceiver(forceFinishReceiver) } catch (_: Exception) { }
-        
-        // Cleanup location status manager
-        try {
-            locationStatusManager.cleanup()
-        } catch (e: Exception) {
-            Log.w("MainActivity", "Error cleaning up location status manager: ${e.message}")
-        }
         
         // Do not stop mesh here; ForegroundService owns lifecycle for background reliability
     }

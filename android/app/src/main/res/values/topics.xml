@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="topic_channels_title">Channels</string>
+    <string name="topic_channels_subtitle">Create or join a channel by name. Public channels are visible to anyone who joins; password-protected channels require the password.</string>
+    <string name="topic_local_subtitle">Nearby devices over Bluetooth or Wi-Fi · no internet needed</string>
+    <string name="topic_join">Create / join channel</string>
+    <string name="topic_join_hint">Enter the same name to join the same channel</string>
+    <string name="topic_name">#channel</string>
+    <string name="topic_password">Password (optional)</string>
+    <string name="topic_leave">Leave channel</string>
+    <string name="topic_online">Online</string>
+    <string name="topic_connecting">Connecting…</string>
+    <string name="topic_password_required">Password required</string>
+    <string name="topic_offline">Offline · tap to reconnect</string>
+    <string name="about_online_topics_title">Online channels</string>
+    <string name="about_online_topics_desc">Join a named channel over the internet. Public channels are open to anyone who knows the name; protected channels require a password.</string>
+    <string name="topic_privacy_bullets">• No device coordinates are read\n• Bluetooth mesh works offline\n• Named channels use the internet</string>
+    <string name="topic_howto_channels">Tap the channel icon to switch, create or join a channel.</string>
+    <string name="topic_online_only">Continue with online channels</string>
+</resources>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="topic_channels_title">頻道</string>
+    <string name="topic_channels_subtitle">透過名稱建立或加入頻道。公開頻道對加入者可見；加密頻道需要密碼。</string>
+    <string name="topic_local_subtitle">透過藍牙或 Wi-Fi 連線附近裝置 · 無需網際網路</string>
+    <string name="topic_join">建立 / 加入頻道</string>
+    <string name="topic_join_hint">輸入相同名稱即可加入同一頻道</string>
+    <string name="topic_name">#頻道名稱</string>
+    <string name="topic_password">密碼（可选）</string>
+    <string name="topic_leave">退出頻道</string>
+    <string name="topic_online">線上</string>
+    <string name="topic_connecting">連線中…</string>
+    <string name="topic_password_required">需要密碼</string>
+    <string name="topic_offline">離線 · 點擊重新連線</string>
+    <string name="about_online_topics_title">線上頻道</string>
+    <string name="about_online_topics_desc">透過網際網路加入命名頻道。知道名稱即可加入公開頻道；加密頻道需要密碼。</string>
+    <string name="topic_privacy_bullets">• 不讀取裝置座標\n• 藍牙 Mesh 可離線使用\n• 命名頻道透過網際網路連線</string>
+    <string name="topic_howto_channels">點擊頻道圖示切換、建立或加入頻道。</string>
+    <string name="topic_online_only">僅使用線上頻道</string>
+</resources>

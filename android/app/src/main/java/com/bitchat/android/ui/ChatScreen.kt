@@ -39,12 +39,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bitchat.android.R
-import com.bitchat.android.geohash.ChannelID
-import com.bitchat.android.geohash.GeohashChannelLevel
-import com.bitchat.android.geohash.LocationChannelManager
 import com.bitchat.android.model.BitchatMessage
-import com.bitchat.android.nostr.LocationNotesManager
-import com.bitchat.android.nostr.NearbyNotesController
 import com.bitchat.android.ui.media.FullScreenImageViewer
 import com.bitchat.android.ui.theme.BitchatMotion
 
@@ -64,7 +59,6 @@ fun ChatScreen(viewModel: ChatViewModel) {
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val connectedPeers by viewModel.connectedPeers.collectAsStateWithLifecycle()
     val peerNicknames by viewModel.peerNicknames.collectAsStateWithLifecycle()
-    val geohashPeople by viewModel.geohashPeople.collectAsStateWithLifecycle()
     val nickname by viewModel.nickname.collectAsStateWithLifecycle()
     val selectedPrivatePeer by viewModel.selectedPrivateChatPeer.collectAsStateWithLifecycle()
     val currentChannel by viewModel.currentChannel.collectAsStateWithLifecycle()
@@ -89,7 +83,6 @@ fun ChatScreen(viewModel: ChatViewModel) {
     var showPasswordDialog by remember { mutableStateOf(false) }
     var passwordInput by remember { mutableStateOf("") }
     var showLocationChannelsSheet by remember { mutableStateOf(false) }
-    var showLocationNotesSheet by remember { mutableStateOf(false) }
     var showUserSheet by remember { mutableStateOf(false) }
     var selectedUserForSheet by remember { mutableStateOf("") }
     var selectedMessageForSheet by remember { mutableStateOf<BitchatMessage?>(null) }
@@ -115,53 +108,34 @@ fun ChatScreen(viewModel: ChatViewModel) {
     val isConnected by viewModel.isConnected.collectAsStateWithLifecycle()
     val passwordPromptChannel by viewModel.passwordPromptChannel.collectAsStateWithLifecycle()
 
-    // Get location channel info for timeline switching
-    val selectedLocationChannel by viewModel.selectedLocationChannel.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val locationManager = remember { LocationChannelManager.getInstance(context) }
-    val nearbyNotesController = remember { NearbyNotesController.shared }
     val liveVoiceManager = remember(context) {
         com.bitchat.android.features.voice.LiveVoiceManager.getInstance(context)
     }
-    val nearbyNotesRevealed by nearbyNotesController.revealed.collectAsStateWithLifecycle()
-    val locationPermissionState by locationManager.permissionState.collectAsStateWithLifecycle()
-    val locationEnabled by locationManager.effectiveLocationEnabled.collectAsStateWithLifecycle(false)
-    val availableLocationChannels by locationManager.availableChannels.collectAsStateWithLifecycle()
-    val nearbyNotes by remember { LocationNotesManager.getInstance() }
-        .notes
-        .collectAsStateWithLifecycle()
-    val buildingGeohash = availableLocationChannels
-        .firstOrNull { it.level == GeohashChannelLevel.BUILDING }
-        ?.geohash
     val isMeshTimeline =
         currentChannel == null &&
-            selectedLocationChannel is ChannelID.Mesh &&
             selectedPrivatePeer == null &&
             privateChatSheetPeer == null
 
     val processLifecycleOwner = remember { ProcessLifecycleOwner.get() }
-    DisposableEffect(processLifecycleOwner, nearbyNotesController) {
+    DisposableEffect(processLifecycleOwner, liveVoiceManager) {
         val lifecycle = processLifecycleOwner.lifecycle
         val observer = object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
-                nearbyNotesController.updateAppForeground(true)
+
                 liveVoiceManager.setAppForeground(true)
             }
 
             override fun onStop(owner: LifecycleOwner) {
-                nearbyNotesController.updateAppForeground(false)
+
                 liveVoiceManager.setAppForeground(false)
             }
         }
 
         lifecycle.addObserver(observer)
-        nearbyNotesController.updateAppForeground(
-            lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED),
-        )
-
         onDispose {
             lifecycle.removeObserver(observer)
-            nearbyNotesController.updateAppForeground(false)
+
             liveVoiceManager.setAppForeground(false)
         }
     }
@@ -176,86 +150,15 @@ fun ChatScreen(viewModel: ChatViewModel) {
         }
     }
 
-    DisposableEffect(
-        isMeshTimeline,
-        locationEnabled,
-        locationPermissionState,
-        buildingGeohash,
-        nearbyNotesController,
-    ) {
-        nearbyNotesController.updateAvailability(
-            locationEnabled = locationEnabled,
-            locationAuthorized =
-                locationPermissionState == LocationChannelManager.PermissionState.AUTHORIZED,
-            buildingGeohash = buildingGeohash,
-        )
-        if (isMeshTimeline) nearbyNotesController.activate()
-        onDispose {
-            if (isMeshTimeline) nearbyNotesController.deactivate()
-        }
-    }
-
-    // Determine what messages to show based on current context (unified timelines)
-    // Legacy private chat timeline removed - private chats now exclusively use PrivateChatSheet
-    val displayMessages = when {
-        currentChannel != null -> channelMessages[currentChannel] ?: emptyList()
-        else -> {
-            val locationChannel = selectedLocationChannel
-            if (locationChannel is com.bitchat.android.geohash.ChannelID.Location) {
-                val geokey = "geo:${locationChannel.channel.geohash}"
-                channelMessages[geokey] ?: emptyList()
-            } else {
-                messages // Mesh timeline
-            }
-        }
-    }
-
-    // Identity of the timeline on screen, derived exactly like displayMessages above. Drives the
-    // per-conversation scroll position and animation state in MessagesList.
-    val conversationKey = when {
-        currentChannel != null -> "channel:$currentChannel"
-        else -> {
-            val locationChannel = selectedLocationChannel
-            if (locationChannel is com.bitchat.android.geohash.ChannelID.Location) {
-                "geo:${locationChannel.channel.geohash}"
-            } else {
-                "mesh"
-            }
-        }
-    }
-
-    val mentionPeerIdentities = remember(
-        displayMessages,
-        currentChannel,
-        selectedLocationChannel,
-        connectedPeers,
-        peerNicknames,
-        geohashPeople,
-    ) {
-        val knownPeers = if (
-            currentChannel == null && selectedLocationChannel is ChannelID.Location
-        ) {
-            val duplicateNames = duplicateGeohashBaseNames(geohashPeople)
-            geohashPeople.mapNotNull { person ->
-                if (isUnannouncedNickname(person.displayName)) return@mapNotNull null
-                val displayName = disambiguatedGeohashDisplayName(person, duplicateNames)
-                displayName to PeerIdentity.nostr(person.id)
-            }
-        } else {
-            connectedPeers.mapNotNull { peerID ->
-                peerNicknames[peerID]?.let { displayName ->
-                    displayName to PeerIdentity.mesh(peerID)
-                }
-            }
+    val displayMessages = if (currentChannel != null) channelMessages[currentChannel] ?: emptyList() else messages
+    val conversationKey = currentChannel?.let { "channel:$it" } ?: "mesh"
+    val mentionPeerIdentities = remember(displayMessages, connectedPeers, peerNicknames) {
+        val knownPeers = connectedPeers.mapNotNull { peerID ->
+            peerNicknames[peerID]?.let { displayName -> displayName to PeerIdentity.mesh(peerID) }
         }
         buildMentionPeerIdentityMap(displayMessages, knownPeers)
     }
-
-    // Determine whether to show media buttons (only hide in geohash location chats)
-    val showMediaButtons = when {
-        currentChannel != null -> true
-        else -> selectedLocationChannel !is com.bitchat.android.geohash.ChannelID.Location
-    }
+    val showMediaButtons = true
 
     // Use WindowInsets to handle keyboard properly
     Box(
@@ -291,14 +194,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
                 )
         ) {
           Box(modifier = Modifier.weight(1f)) {
-            // Messages area - takes up available space, will compress when keyboard appears
-            // Nearby-notes strip and the reveal hint both live in this Box alongside the
-            // list, rather than in a Column above it, because the conversation has to scroll
-            // underneath the translucent bars. Their heights are reserved as list padding.
-            var notesStripHeight by remember { mutableStateOf(0.dp) }
-            val showNotesStrip =
-                isMeshTimeline && nearbyNotesRevealed && nearbyNotes.isNotEmpty()
-
+            // Original upstream conversation layout.
             MessagesList(
                 messages = displayMessages,
                 currentUserNickname = nickname,
@@ -307,8 +203,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
                 modifier = Modifier.fillMaxSize(),
                 conversationKey = conversationKey,
                 contentPadding = PaddingValues(
-                    top = statusBarHeight + headerHeight +
-                        (if (showNotesStrip) notesStripHeight else 0.dp),
+                    top = statusBarHeight + headerHeight,
                     bottom = composerHeight
                 ),
                 forceScrollToBottom = forceScrollToBottom,
@@ -317,21 +212,8 @@ fun ChatScreen(viewModel: ChatViewModel) {
                     // Single click - mention user in text input
                     val currentText = messageText.text
 
-                    // Extract base nickname and hash suffix from full sender name
-                    val (baseName, hashSuffix) = splitSuffix(fullSenderName)
-
-                    // Check if we're in a geohash channel to include hash suffix
-                    val selectedLocationChannel = viewModel.selectedLocationChannel.value
-                    val mentionText = if (
-                        selectedLocationChannel is ChannelID.Location &&
-                        hashSuffix.isNotEmpty()
-                    ) {
-                        // In geohash chat - include the hash suffix from the full display name
-                        "@$baseName$hashSuffix"
-                    } else {
-                        // Regular chat - just the base nickname
-                        "@$baseName"
-                    }
+                    val (baseName, _) = splitSuffix(fullSenderName)
+                    val mentionText = "@$baseName"
 
                     val newText = when {
                         currentText.isEmpty() -> "$mentionText "
@@ -361,19 +243,6 @@ fun ChatScreen(viewModel: ChatViewModel) {
                     showFullScreenImageViewer = true
                 }
             )
-
-            if (showNotesStrip) {
-                NearbyNotesStrip(
-                    noteCount = nearbyNotes.size,
-                    onClick = { showLocationNotesSheet = true },
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = statusBarHeight + headerHeight)
-                        .onSizeChanged { size ->
-                            notesStripHeight = with(density) { size.height.toDp() }
-                        },
-                )
-            }
 
             // Input area - overlays the bottom of the conversation
         // Bridge file share from lower-level input to ViewModel
@@ -460,10 +329,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
             onShowAppInfo = { viewModel.showAppInfo() },
             onPanicClear = { viewModel.panicClearAllData() },
             onLocationChannelsClick = { showLocationChannelsSheet = true },
-            onLocationNotesClick = {
-                nearbyNotesController.reveal()
-                showLocationNotesSheet = true
-            }
+            onLocationNotesClick = {}
         )
 
         // Scroll-to-bottom floating button
@@ -537,12 +403,6 @@ fun ChatScreen(viewModel: ChatViewModel) {
         onAppInfoDismiss = { viewModel.hideAppInfo() },
         showLocationChannelsSheet = showLocationChannelsSheet,
         onLocationChannelsSheetDismiss = { showLocationChannelsSheet = false },
-        onLocationNotesFromChannelsClick = {
-            showLocationChannelsSheet = false
-            showLocationNotesSheet = true
-        },
-        showLocationNotesSheet = showLocationNotesSheet,
-        onLocationNotesSheetDismiss = { showLocationNotesSheet = false },
         showUserSheet = showUserSheet,
         onUserSheetDismiss = { 
             showUserSheet = false
@@ -584,44 +444,6 @@ fun ChatScreen(viewModel: ChatViewModel) {
                 }
             }
         )
-    }
-}
-
-@Composable
-private fun NearbyNotesStrip(
-    noteCount: Int,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 48.dp)
-                .padding(horizontal = 12.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "📍 " + if (noteCount == 1) {
-                    stringResource(R.string.nearby_notes_one)
-                } else {
-                    stringResource(R.string.nearby_notes_many, noteCount)
-                },
-                modifier = Modifier.weight(1f),
-                color = MaterialTheme.colorScheme.primary,
-                fontFamily = BitchatFontFamily,
-                fontSize = 12.sp,
-            )
-            Text(
-                text = "›",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 18.sp,
-            )
-        }
     }
 }
 
@@ -765,7 +587,6 @@ private fun ChatFloatingHeader(
     onLocationNotesClick: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val locationManager = remember { com.bitchat.android.geohash.LocationChannelManager.getInstance(context) }
 
     Box(
         modifier = Modifier
@@ -803,11 +624,7 @@ private fun ChatFloatingHeader(
             onTripleClick = onPanicClear,
             onShowAppInfo = onShowAppInfo,
             onLocationChannelsClick = onLocationChannelsClick,
-            onLocationNotesClick = {
-                // Ensure location is loaded before showing sheet
-                locationManager.refreshChannels()
-                onLocationNotesClick()
-            }
+            onLocationNotesClick = {}
         )
     }
 }
@@ -825,9 +642,6 @@ private fun ChatDialogs(
     onAppInfoDismiss: () -> Unit,
     showLocationChannelsSheet: Boolean,
     onLocationChannelsSheetDismiss: () -> Unit,
-    onLocationNotesFromChannelsClick: () -> Unit,
-    showLocationNotesSheet: Boolean,
-    onLocationNotesSheetDismiss: () -> Unit,
     showUserSheet: Boolean,
     onUserSheetDismiss: () -> Unit,
     selectedUserForSheet: String,
@@ -867,20 +681,11 @@ private fun ChatDialogs(
         )
     }
     
-    // Location channels sheet
+    // Named channels sheet
     if (showLocationChannelsSheet) {
         TopicChannelsSheet(onDismiss = onLocationChannelsSheetDismiss, viewModel = viewModel)
     }
     
-    // Location notes sheet (extracted to separate presenter)
-    if (showLocationNotesSheet) {
-        LocationNotesSheetPresenter(
-            viewModel = viewModel,
-            onDismiss = onLocationNotesSheetDismiss
-        )
-    }
-    
-    // User action sheet
     if (showUserSheet) {
         ChatUserSheet(
             isPresented = showUserSheet,

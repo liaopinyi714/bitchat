@@ -712,7 +712,7 @@ fun LocationChannelsSheet(
  * Selected state is a 12.dp green dot centered in the leading slot (icon-sized footprint).
  */
 @Composable
-private fun ChannelOptionRow(
+internal fun ChannelOptionRow(
     title: String,
     subtitle: String,
     isSelected: Boolean,

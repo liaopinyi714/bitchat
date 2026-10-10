@@ -29,10 +29,12 @@ class BluetoothPermissionManager(private val context: Context) {
             ))
         }
         
-        permissions.addAll(listOf(
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ))
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) {
+            permissions.addAll(listOf(
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ))
+        }
 
         return permissions.all { 
             ActivityCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED 

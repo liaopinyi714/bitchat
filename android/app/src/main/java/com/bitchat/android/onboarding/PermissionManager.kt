@@ -80,7 +80,7 @@ class PermissionManager(private val context: Context) {
 
     /**
      * Get required permissions that can be requested together.
-     * Background location is handled separately to ensure correct request order.
+     * These permissions enable optional local discovery; online channels work without them.
      * Note: Notification permission is optional and not included here,
      * so the app works without notification access.
      */
@@ -101,11 +101,13 @@ class PermissionManager(private val context: Context) {
             ))
         }
 
-        // Location permissions (required for Bluetooth LE scanning)
-        permissions.addAll(listOf(
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ))
+        // Only Android 8–11 requires location permission for BLE scans.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            permissions.addAll(listOf(
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ))
+        }
 
         // Wi‑Fi Aware: Android 13+ requires NEARBY_WIFI_DEVICES runtime permission
         if (shouldRequireWifiAwarePermission()) {
@@ -117,26 +119,10 @@ class PermissionManager(private val context: Context) {
         return permissions
     }
 
-    /**
-     * Background location permission is required on Android 10+ for background BLE scanning.
-     * Must be requested after foreground location permissions are granted.
-     */
-    fun needsBackgroundLocationPermission(): Boolean {
-        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
-    }
-
-    fun getBackgroundLocationPermission(): String? {
-        return if (needsBackgroundLocationPermission()) {
-            Manifest.permission.ACCESS_BACKGROUND_LOCATION
-        } else {
-            null
-        }
-    }
-
-    fun isBackgroundLocationGranted(): Boolean {
-        val permission = getBackgroundLocationPermission() ?: return true
-        return isPermissionGranted(permission)
-    }
+    // Compatibility accessors for upstream callers: this build never requests background location.
+    fun needsBackgroundLocationPermission(): Boolean = false
+    fun getBackgroundLocationPermission(): String? = null
+    fun isBackgroundLocationGranted(): Boolean = true
 
     /**
      * Get optional permissions that improve the experience but aren't required.
@@ -262,21 +248,22 @@ class PermissionManager(private val context: Context) {
             )
         )
 
-        // Location category
-        val locationPermissions = listOf(
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        )
-
-        categories.add(
-            PermissionCategory(
-                type = PermissionType.PRECISE_LOCATION,
-                description = "Required by Android to discover nearby bitchat users via Bluetooth",
-                permissions = locationPermissions,
-                isGranted = locationPermissions.all { isPermissionGranted(it) },
-                systemDescription = "bitchat needs this to scan for nearby devices"
+        // Legacy BLE permission only; no geographic chat or GPS access.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            val locationPermissions = listOf(
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.ACCESS_FINE_LOCATION
             )
-        )
+            categories.add(
+                PermissionCategory(
+                    type = PermissionType.PRECISE_LOCATION,
+                    description = "Required by Android 8–11 for Bluetooth discovery; online channels work without it",
+                    permissions = locationPermissions,
+                    isGranted = locationPermissions.all { isPermissionGranted(it) },
+                    systemDescription = "bitchat does not read device coordinates"
+                )
+            )
+        }
 
         // Wi‑Fi Aware category (Android 13+)
         if (shouldRequireWifiAwarePermission()) {
@@ -288,19 +275,6 @@ class PermissionManager(private val context: Context) {
                     permissions = wifiAwarePermissions,
                     isGranted = wifiAwarePermissions.all { isPermissionGranted(it) },
                     systemDescription = "Allow bitchat to discover nearby Wi‑Fi devices"
-                )
-            )
-        }
-
-        if (needsBackgroundLocationPermission()) {
-            val backgroundPermission = listOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-            categories.add(
-                PermissionCategory(
-                    type = PermissionType.BACKGROUND_LOCATION,
-                    description = context.getString(R.string.perm_background_location_desc),
-                    permissions = backgroundPermission,
-                    isGranted = backgroundPermission.all { isPermissionGranted(it) },
-                    systemDescription = context.getString(R.string.perm_background_location_system)
                 )
             )
         }

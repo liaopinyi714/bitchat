@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="topic_channels_title">频道</string>
+    <string name="topic_channels_subtitle">通过名称创建或加入频道。公开频道对加入者可见；加密频道需要密码。</string>
+    <string name="topic_local_subtitle">通过蓝牙或 Wi-Fi 连接附近设备 · 无需互联网</string>
+    <string name="topic_join">创建 / 加入频道</string>
+    <string name="topic_join_hint">输入相同名称即可加入同一频道</string>
+    <string name="topic_name">#频道名称</string>
+    <string name="topic_password">密码（可选）</string>
+    <string name="topic_leave">退出频道</string>
+    <string name="topic_online">在线</string>
+    <string name="topic_connecting">连接中…</string>
+    <string name="topic_password_required">需要密码</string>
+    <string name="topic_offline">离线 · 点击重新连接</string>
+    <string name="about_online_topics_title">在线频道</string>
+    <string name="about_online_topics_desc">通过互联网加入命名频道。知道名称即可加入公开频道；加密频道需要密码。</string>
+    <string name="topic_privacy_bullets">• 不读取设备坐标\n• 蓝牙 Mesh 可离线使用\n• 命名频道通过互联网连接</string>
+    <string name="topic_howto_channels">点击频道图标切换、创建或加入频道。</string>
+    <string name="topic_online_only">仅使用在线频道</string>
+</resources>

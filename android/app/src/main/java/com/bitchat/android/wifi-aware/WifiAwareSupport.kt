@@ -29,6 +29,16 @@ object WifiAwareSupport {
             )
         }
 
+        // Android 12/12L still requires location access for Aware. This build excludes
+        // location permissions on those versions; keep BLE and online channels available.
+        if (Build.VERSION.SDK_INT in Build.VERSION_CODES.S..Build.VERSION_CODES.S_V2) {
+            return Status(
+                supported = false,
+                available = false,
+                reason = "Wi-Fi Aware on Android 12 requires location access; use Bluetooth or online channels"
+            )
+        }
+
         val hasFeature = try {
             appContext.packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_AWARE)
         } catch (_: Exception) {

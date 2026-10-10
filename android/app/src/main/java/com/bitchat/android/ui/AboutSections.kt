@@ -378,15 +378,11 @@ internal fun AboutHowToUseSection(modifier: Modifier = Modifier) {
         )
         AboutInstructionRow(
             iconRes = R.drawable.ic_spec_globe,
-            text = stringResource(R.string.about_howto_channels)
+            text = stringResource(R.string.topic_howto_channels)
         )
         AboutInstructionRow(
             iconRes = R.drawable.ic_spec_people,
             text = stringResource(R.string.about_howto_people)
-        )
-        AboutInstructionRow(
-            iconRes = R.drawable.ic_spec_bookmark_outline,
-            text = stringResource(R.string.about_howto_bookmark)
         )
         AboutInstructionRow(
             iconRes = R.drawable.ic_spec_mention,
@@ -421,8 +417,8 @@ internal fun AboutFeatureCard(modifier: Modifier = Modifier) {
         ),
         Triple(
             R.drawable.ic_spec_globe,
-            R.string.about_online_geohash_title,
-            R.string.about_online_geohash_desc
+            R.string.about_online_topics_title,
+            R.string.about_online_topics_desc
         ),
         Triple(
             R.drawable.ic_spec_eye_off,

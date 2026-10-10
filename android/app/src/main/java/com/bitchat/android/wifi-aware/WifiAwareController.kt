@@ -205,14 +205,12 @@ object WifiAwareController {
             return
         }
 
-        // Check system location setting: WifiAwareManager.attach() throws SecurityException if disabled
-        val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
-        val locationEnabled = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            lm?.isLocationEnabled == true
+        // Android 13+ uses nearby-device permission without requiring location access.
+        val locationEnabled = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            true
         } else {
-            @Suppress("DEPRECATION")
-            lm?.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) == true ||
-            lm?.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER) == true
+            val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
+            lm?.isLocationEnabled == true
         }
 
         if (!locationEnabled) {

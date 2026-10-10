@@ -505,18 +505,10 @@ fun AboutSheet(
 
                     // Settings Section - Unified Card with Toggles
                     item(key = "settings") {
-                        LaunchedEffect(Unit) { PoWPreferenceManager.init(context) }
-                        val powEnabled by PoWPreferenceManager.powEnabled.collectAsState()
-                        val powDifficulty by PoWPreferenceManager.powDifficulty.collectAsState()
                         var backgroundEnabled by remember { mutableStateOf(com.bitchat.android.service.MeshServicePreferences.isBackgroundEnabled(true)) }
                         var liveVoiceEnabled by remember {
                             mutableStateOf(com.bitchat.android.features.voice.LiveVoicePreferences.isEnabled(context))
                         }
-                        val torMode = remember { mutableStateOf(TorPreferenceManager.get(context)) }
-                        val torProvider = remember { ArtiTorManager.getInstance() }
-                        val torStatus by torProvider.statusFlow.collectAsState()
-                        val torAvailable = remember { torProvider.isTorAvailable() }
-
                         Column {
                             AboutSectionLabel(text = stringResource(R.string.about_section_settings))
                             Surface(
@@ -565,55 +557,6 @@ fun AboutSheet(
                                         modifier = Modifier.padding(start = 54.dp),
                                         thickness = 1.dp,
                                         color = colorScheme.outlineVariant
-                                    )
-
-                                    // Proof of Work Toggle
-                                    SettingsToggleRow(
-                                        icon = Icons.Filled.Speed,
-                                        title = stringResource(R.string.about_pow),
-                                        subtitle = stringResource(R.string.about_pow_tip),
-                                        checked = powEnabled,
-                                        onCheckedChange = { PoWPreferenceManager.setPowEnabled(it) }
-                                    )
-
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(start = 54.dp),
-                                        thickness = 1.dp,
-                                        color = colorScheme.outlineVariant
-                                    )
-
-                                    // Tor Toggle
-                                    SettingsToggleRow(
-                                        icon = Icons.Filled.Security,
-                                        title = stringResource(R.string.about_tor_title),
-                                        subtitle = stringResource(R.string.about_tor_route),
-                                        checked = torMode.value == TorMode.ON,
-                                        onCheckedChange = { enabled ->
-                                            if (torAvailable) {
-                                                torMode.value = if (enabled) TorMode.ON else TorMode.OFF
-                                                TorPreferenceManager.set(context, torMode.value)
-                                            }
-                                        },
-                                        enabled = torAvailable,
-                                        statusIndicator = if (torMode.value == TorMode.ON) {
-                                            {
-                                                val statusColor = when {
-                                                    torStatus.running && torStatus.bootstrapPercent >= 100 -> colorScheme.primary
-                                                    torStatus.running -> palette.accentOrange
-                                                    else -> colorScheme.error
-                                                }
-                                                Surface(
-                                                    color = statusColor,
-                                                    shape = CircleShape,
-                                                    modifier = Modifier.size(8.dp)
-                                                ) {}
-                                            }
-                                        } else null
-                                    )
-
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(start = 56.dp),
-                                        color = colorScheme.outline.copy(alpha = 0.12f)
                                     )
 
                                     // === Prepare App for Sharing Section ===
@@ -1083,151 +1026,6 @@ fun AboutSheet(
                                 }
                             }
 
-                            // Tor unavailable hint
-                            if (!torAvailable) {
-                                Text(
-                                    text = stringResource(R.string.tor_not_available_in_this_build),
-                                    fontSize = 12.sp,
-                                    fontFamily = BitchatFontFamily,
-                                    color = palette.textTertiary,
-                                    modifier = Modifier.padding(
-                                        start = AboutHorizontalPadding + 16.dp,
-                                        top = 8.dp
-                                    )
-                                )
-                            }
-                        }
-                    }
-
-                    // PoW Difficulty Slider (when enabled)
-                    item(key = "pow_slider") {
-                        val powEnabled by PoWPreferenceManager.powEnabled.collectAsState()
-                        val powDifficulty by PoWPreferenceManager.powDifficulty.collectAsState()
-
-                        if (powEnabled) {
-                            Column(modifier = Modifier.padding(top = 12.dp)) {
-                                Surface(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = AboutHorizontalPadding),
-                                    color = colorScheme.surface,
-                                    shape = AboutCardShape
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(16.dp),
-                                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = stringResource(R.string.about_difficulty),
-                                                fontFamily = BitchatFontFamily,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                color = colorScheme.onSurface
-                                            )
-                                            AnimatedCountLabel(
-                                                count = powDifficulty,
-                                                text = stringResource(
-                                                    R.string.about_difficulty_value,
-                                                    powDifficulty,
-                                                    NostrProofOfWork.estimateMiningTime(powDifficulty)
-                                                ),
-                                                fontFamily = BitchatFontFamily,
-                                                fontSize = 12.sp,
-                                                color = colorScheme.onSurfaceVariant
-                                            )
-                                        }
-
-                                        Slider(
-                                            value = powDifficulty.toFloat(),
-                                            onValueChange = { PoWPreferenceManager.setPowDifficulty(it.toInt()) },
-                                            valueRange = 0f..32f,
-                                            steps = 31,
-                                            colors = SliderDefaults.colors(
-                                                thumbColor = colorScheme.primary,
-                                                activeTrackColor = colorScheme.primary,
-                                                inactiveTrackColor = colorScheme.surfaceVariant
-                                            )
-                                        )
-
-                                        AnimatedCountLabel(
-                                            count = powDifficulty,
-                                            text = when {
-                                                powDifficulty == 0 -> stringResource(R.string.about_pow_desc_none)
-                                                powDifficulty <= 8 -> stringResource(R.string.about_pow_desc_very_low)
-                                                powDifficulty <= 12 -> stringResource(R.string.about_pow_desc_low)
-                                                powDifficulty <= 16 -> stringResource(R.string.about_pow_desc_medium)
-                                                powDifficulty <= 20 -> stringResource(R.string.about_pow_desc_high)
-                                                powDifficulty <= 24 -> stringResource(R.string.about_pow_desc_very_high)
-                                                else -> stringResource(R.string.about_pow_desc_extreme)
-                                            },
-                                            fontSize = 12.sp,
-                                            fontFamily = BitchatFontFamily,
-                                            color = palette.textTertiary
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Tor Status (when enabled)
-                    item(key = "tor_status") {
-                        val torMode = remember { mutableStateOf(TorPreferenceManager.get(context)) }
-                        val torProvider = remember { ArtiTorManager.getInstance() }
-                        val torStatus by torProvider.statusFlow.collectAsState()
-
-                        if (torMode.value == TorMode.ON) {
-                            Column(modifier = Modifier.padding(top = 12.dp)) {
-                                Surface(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = AboutHorizontalPadding),
-                                    color = colorScheme.surface,
-                                    shape = AboutCardShape
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(16.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            val statusColor = when {
-                                                torStatus.running && torStatus.bootstrapPercent >= 100 -> colorScheme.primary
-                                                torStatus.running -> palette.accentOrange
-                                                else -> colorScheme.error
-                                            }
-                                            Surface(color = statusColor, shape = CircleShape, modifier = Modifier.size(10.dp)) {}
-                                            Text(
-                                                text = if (torStatus.running) {
-                                                    stringResource(R.string.about_tor_connected, torStatus.bootstrapPercent)
-                                                } else {
-                                                    stringResource(R.string.about_tor_disconnected)
-                                                },
-                                                fontFamily = BitchatFontFamily,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                color = colorScheme.onSurface
-                                            )
-                                        }
-                                        if (torStatus.lastLogLine.isNotEmpty()) {
-                                            Text(
-                                                text = torStatus.lastLogLine.take(120),
-                                                fontSize = 11.sp,
-                                                fontFamily = BitchatFontFamily,
-                                                color = palette.textTertiary,
-                                                maxLines = 2
-                                            )
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
 

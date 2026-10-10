@@ -2,6 +2,12 @@
 
 手机端最低 Android 8.0（API 26），compile / target SDK 为 37，构建工具 37.0.0。Wi-Fi Aware 需要支持该功能的硬件；不支持时继续使用蓝牙或在线连接。
 
+0.1.1 的聊天布局、字体、颜色、底部抽屉和频道行复用上游组件。频道页只列出已加入的命名频道；创建和加入使用弹窗。地图、地理频道、附近笔记，以及针对旧 Nostr 地理聊天的 Tor / PoW 设置不再出现在手机用户流程中。
+
+Android 12 及以上的 BLE 使用 `neverForLocation`，只申请附近设备权限；定位权限的声明限定到 API 30。Android 8–11 的 BLE 扫描仍受系统定位权限和位置开关限制，可以选择“仅使用在线频道”或拒绝权限。不会申请后台定位；旧系统的后台 BLE 发现因此可能受限。在线频道的启动和使用不依赖定位权限或位置开关。Wi-Fi Aware 属于可选本地传输，其旧系统限制仍由系统决定。
+
+Wi-Fi Aware 在 Android 13 及以上使用附近 Wi-Fi 设备权限，不强制开启系统定位。Android 12 / 12L 的 Aware API 仍要求定位权限；本分支在这两个版本回退到蓝牙和在线频道，保持不申请定位。参见 [Android 蓝牙权限](https://developer.android.com/develop/connectivity/bluetooth/bt-permissions)与 [Wi-Fi 权限](https://developer.android.com/develop/connectivity/wifi/wifi-permissions)。热点 APK 分享在 Android 12 / 12L 同样受旧 Wi-Fi 权限要求限制，可改用普通 APK 文件分享。
+
 ## 调试构建
 
 安装 JDK 21 与上述 Android SDK。推荐 Android Studio，或在 Android 目录运行：
