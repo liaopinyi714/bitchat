@@ -47,6 +47,19 @@ class MessageGroupingTest {
     }
 
     @Test
+    fun `renaming starts a new sender label without changing earlier messages`() {
+        for ((isPrivate, channel) in listOf(false to null, false to "#sample", true to null)) {
+            val earlier = message(sender = "before", isPrivate = isPrivate, channel = channel)
+            val renamed = message(sender = "after", offsetMs = 1_000, isPrivate = isPrivate, channel = channel)
+            val continuation = message(sender = "after", offsetMs = 2_000, isPrivate = isPrivate, channel = channel)
+
+            assertFalse("A changed nickname must be visible", MessageGrouping.shouldGroup(earlier, renamed))
+            assertTrue(MessageGrouping.shouldGroup(renamed, continuation))
+            assertEquals("before", earlier.sender)
+        }
+    }
+
+    @Test
     fun `messages from different peers do not group`() {
         val first = message(sender = "alice", senderPeerId = "peer-alice")
         val second = message(sender = "bob", senderPeerId = "peer-bob", offsetMs = 1_000)

@@ -11,10 +11,16 @@ import com.bitchat.android.model.BitchatMessage
 internal fun BitchatMessage.isFromSelf(
     currentUserNickname: String,
     myPeerId: String,
-): Boolean =
-    senderPeerID == myPeerId ||
-        sender == currentUserNickname ||
-        sender.startsWith("$currentUserNickname#")
+): Boolean {
+    // Nicknames can change or be shared. Use a packet's identity when available, including for
+    // messages sent under an earlier local nickname; legacy messages may only have a label.
+    val peerID = senderPeerID?.takeIf { it.isNotBlank() }
+    return if (peerID != null) {
+        peerID.equals(myPeerId, ignoreCase = true)
+    } else {
+        sender == currentUserNickname || sender.startsWith("$currentUserNickname#")
+    }
+}
 
 internal fun normalizeMessageUrl(rawUrl: String): String =
     if (

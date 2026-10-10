@@ -8,6 +8,8 @@
 
 0.1.3 继续补齐调试面板、传输统计和安装包信息的中文文案，并修复密码确认、连接超时和退出后的异步状态。界面布局继续沿用上游组件。
 
+0.1.4 修复昵称变化后的消息分组：新消息显示新昵称，旧消息保留原昵称。私聊回执和文件取消按身份判断归属，避免改名后丢失操作或同名用户被误认作自己。
+
 Android 12 及以上的 BLE 使用 `neverForLocation`，只申请附近设备权限；定位权限的声明限定到 API 30。Android 8–11 的 BLE 扫描仍受系统定位权限和位置开关限制，可以选择“仅使用在线频道”或拒绝权限。不会申请后台定位；旧系统的后台 BLE 发现因此可能受限。在线频道的启动和使用不依赖定位权限或位置开关。Wi-Fi Aware 属于可选本地传输，其旧系统限制仍由系统决定。
 
 Wi-Fi Aware 在 Android 13 及以上使用附近 Wi-Fi 设备权限，不强制开启系统定位。Android 12 / 12L 的 Aware API 仍要求定位权限；本分支在这两个版本回退到蓝牙和在线频道，保持不申请定位。参见 [Android 蓝牙权限](https://developer.android.com/develop/connectivity/bluetooth/bt-permissions)与 [Wi-Fi 权限](https://developer.android.com/develop/connectivity/wifi/wifi-permissions)。热点 APK 分享在 Android 12 / 12L 同样受旧 Wi-Fi 权限要求限制，可改用普通 APK 文件分享。

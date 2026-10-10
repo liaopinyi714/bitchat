@@ -22,6 +22,17 @@ class MessageInteractionUtilsTest {
     }
 
     @Test
+    fun `messages sent before renaming remain owned by the local identity`() {
+        assertTrue(message(sender = "before", senderPeerId = "peer-a").isFromSelf("after", "peer-a"))
+    }
+
+    @Test
+    fun `another identity using the current nickname is not a local message`() {
+        assertFalse(message(sender = "me", senderPeerId = "peer-b").isFromSelf("me", "peer-a"))
+        assertFalse(message(sender = "me#1a2b", senderPeerId = "peer-b").isFromSelf("me", "peer-a"))
+    }
+
+    @Test
     fun `URL normalization preserves explicit HTTP schemes`() {
         assertEquals("http://example.com", normalizeMessageUrl("http://example.com"))
         assertEquals("HTTPS://example.com", normalizeMessageUrl("HTTPS://example.com"))

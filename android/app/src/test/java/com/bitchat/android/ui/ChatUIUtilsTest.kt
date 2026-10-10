@@ -377,6 +377,29 @@ class ChatUIUtilsTest {
     // MARK: - Sender label
 
     @Test
+    fun `sender labels preserve each message nickname after a local rename`() {
+        val earlier = message("first", sender = "before").copy(senderPeerID = "peer-me")
+        val renamed = message("second", sender = "after").copy(senderPeerID = "peer-me")
+        val oldLabel = formatTextMessageSender(earlier, "after", "peer-me", palette)
+        val newLabel = formatTextMessageSender(renamed, "after", "peer-me", palette)
+
+        assertEquals("@before", oldLabel.text)
+        assertEquals("@after", newLabel.text)
+        assertTrue(oldLabel.getStringAnnotations("nickname_click", 0, oldLabel.length).isEmpty())
+        assertTrue(newLabel.getStringAnnotations("nickname_click", 0, newLabel.length).isEmpty())
+    }
+
+    @Test
+    fun `a different peer with the local nickname retains sender interaction`() {
+        val label = formatTextMessageSender(
+            message("hello", sender = "me").copy(senderPeerID = "peer-other"),
+            "me", "peer-me", palette
+        )
+
+        assertEquals(1, label.getStringAnnotations("nickname_click", 0, label.length).size)
+    }
+
+    @Test
     fun `sender label drops angle brackets and dims the hash suffix`() {
         val sender = formatTextMessageSender(
             message = message("hi", sender = "carol#04af"),

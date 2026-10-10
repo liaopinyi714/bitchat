@@ -8,8 +8,8 @@ import com.bitchat.android.ui.theme.ChatVisualTokens
 /**
  * Consecutive-message grouping for the chat surface.
  *
- * The redesign suppresses the `@sender` label on runs of messages from the same author so the
- * eye only has to register a name when the speaker actually changes. The transcript uses one
+ * Suppress the `@sender` label only while both the identity and sender label stay the same.
+ * A nickname change starts a new group and leaves earlier labels intact. The transcript uses one
  * consistent item rhythm; new groups get their additional separation from the visible sender
  * row's own top padding.
  */
@@ -53,6 +53,10 @@ object MessageGrouping {
         // Never group across the public/private boundary or between different channels.
         if (previous.isPrivate != current.isPrivate) return false
         if (previous.channel != current.channel) return false
+
+        // A stable identity can change its nickname. Show the new name at that boundary rather
+        // than attributing the entire run to the earlier message's label.
+        if (previous.sender != current.sender) return false
 
         if (!isSameSender(previous, current)) return false
 
