@@ -136,6 +136,7 @@ fun LocationChannelsSheet(
 
     var customGeohash by remember { mutableStateOf("") }
     var customError by remember { mutableStateOf<String?>(null) }
+    val invalidGeohash = stringResource(R.string.invalid_geohash)
 
     val teleportToGeohash: (String) -> Unit = { value ->
         val channel = channelForManualGeohash(value)
@@ -145,7 +146,7 @@ fun LocationChannelsSheet(
             onDismiss()
         } else {
             customGeohash = value.trim().lowercase().replace("#", "")
-            customError = context.getString(R.string.invalid_geohash)
+            customError = invalidGeohash
         }
     }
 

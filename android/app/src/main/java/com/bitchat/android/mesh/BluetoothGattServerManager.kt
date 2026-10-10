@@ -11,6 +11,7 @@ import android.util.Log
 import com.bitchat.android.protocol.BitchatPacket
 import com.bitchat.android.util.AppConstants
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.*
@@ -50,7 +51,9 @@ class BluetoothGattServerManager(
     private var advertiseRetryCount = 0
     
     // State management
-    private var isActive = false
+    @Volatile private var isActive = false
+    @Volatile private var generation = 0L
+    private var startupJob: Job? = null
 
     private fun isBleTransportEnabled(): Boolean {
         return try {
@@ -79,6 +82,7 @@ class BluetoothGattServerManager(
     /**
      * Start GATT server
      */
+    @Synchronized
     fun start(): Boolean {
         // Respect debug setting
         if (!isServerRoleEnabled()) {
@@ -106,8 +110,13 @@ class BluetoothGattServerManager(
         
         isActive = true
         
-        connectionScope.launch {
-            setupGattServer()
+        startupJob = connectionScope.launch {
+            try {
+                setupGattServer()
+            } catch (_: SecurityException) {
+                stop()
+                return@launch
+            }
             delay(300) // Brief delay to ensure GATT server is ready
             startAdvertising()
         }
@@ -118,38 +127,34 @@ class BluetoothGattServerManager(
     /**
      * Stop GATT server
      */
+    @Synchronized
     fun stop() {
-        if (!isActive) {
-            // Idempotent stop
-            stopAdvertising()
-            // Ensure server is closed if present
-            gattServer?.close()
-            gattServer = null
-            serverLinkIDs.clear()
-            return
-        }
-
         isActive = false
-
-        connectionScope.launch {
-            stopAdvertising()
-            
-            // Try to cancel any active connections explicitly before closing
+        generation++
+        startupJob?.cancel()
+        startupJob = null
+        stopAdvertising()
+        // Complete cleanup before the owner cancels connectionScope.
+        val server = gattServer
+        gattServer = null
+        serverLinkIDs.clear()
+        connectionTracker.getConnectedDevices().values.filter { !it.isClient }.forEach { dc ->
             try {
-                // Disconnect ALL server connections
-                val servers = connectionTracker.getConnectedDevices().values.filter { !it.isClient }
-                servers.forEach { d ->
-                    try { gattServer?.cancelConnection(d.device) } catch (_: Exception) { }
-                }
-            } catch (_: Exception) { }
-            
-            // Close GATT server
-            gattServer?.close()
-            gattServer = null
-            serverLinkIDs.clear()
-            
-            Log.i(TAG, "GATT server stopped")
+                server?.cancelConnection(dc.device)
+            } catch (_: SecurityException) {
+                Log.w(TAG, "Bluetooth permission revoked during server disconnect")
+            } catch (_: RuntimeException) {
+                Log.w(TAG, "Server disconnect failed during shutdown")
+            }
         }
+        try {
+            server?.close()
+        } catch (_: SecurityException) {
+            Log.w(TAG, "Bluetooth permission revoked during server close")
+        } catch (_: RuntimeException) {
+            Log.w(TAG, "Server close failed during shutdown")
+        }
+        Log.i(TAG, "GATT server stopped")
     }
     
     /**
@@ -166,13 +171,16 @@ class BluetoothGattServerManager(
      * Setup GATT server with proper sequencing
      */
     @Suppress("DEPRECATION")
+    @Synchronized
     private fun setupGattServer() {
+        val serverGeneration = generation
+        fun isCurrent() = isActive && generation == serverGeneration
         if (!permissionManager.hasBluetoothPermissions()) return
         
         val serverCallback = object : BluetoothGattServerCallback() {
             override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
                 // Guard against callbacks after service shutdown
-                if (!isActive) {
+                if (!isCurrent()) {
                     return
                 }
 
@@ -195,7 +203,7 @@ class BluetoothGattServerManager(
 
                         connectionScope.launch {
                             delay(1000)
-                            if (isActive) { // Check if still active
+                            if (isCurrent()) { // Check if still active
                                 delegate?.onDeviceConnected(device)
                             }
                         }
@@ -216,7 +224,7 @@ class BluetoothGattServerManager(
             
             override fun onServiceAdded(status: Int, service: BluetoothGattService) {
                 // Guard against callbacks after service shutdown
-                if (!isActive) {
+                if (!isCurrent()) {
                     return
                 }
 
@@ -235,7 +243,7 @@ class BluetoothGattServerManager(
                 value: ByteArray
             ) {
                 // Guard against callbacks after service shutdown
-                if (!isActive) {
+                if (!isCurrent()) {
                     return
                 }
 
@@ -278,7 +286,7 @@ class BluetoothGattServerManager(
                 value: ByteArray
             ) {
                 // Guard against callbacks after service shutdown
-                if (!isActive) {
+                if (!isCurrent()) {
                     return
                 }
 
@@ -287,7 +295,7 @@ class BluetoothGattServerManager(
 
                     connectionScope.launch {
                         delay(100)
-                        if (isActive) { // Check if still active
+                        if (isCurrent()) { // Check if still active
                             delegate?.onDeviceConnected(device)
                         }
                     }
@@ -299,6 +307,7 @@ class BluetoothGattServerManager(
             }
 
             override fun onNotificationSent(device: BluetoothDevice, status: Int) {
+                if (!isCurrent()) return
                 delegate?.onGattServerNotificationComplete(
                     device.address,
                     serverLinkIDs[device.address],

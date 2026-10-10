@@ -16,6 +16,8 @@
 - [安全边界与问题报告](SECURITY.md)
 - [开发与贡献](CONTRIBUTING.md)
 - [版本记录](CHANGELOG.md)
+- [Release 下载、长期签名和发布](docs/RELEASE.md)
+- [使用前验收与长期维护](docs/OPERATIONS.md)
 
 默认在线端点：`wss://chat.123456714.xyz`。Cloudflare 由仓库所有者部署；在部署完成前，在线频道不可用，本地蓝牙功能仍可使用。
 
@@ -41,4 +43,4 @@ LICENSE.md           GPL-3.0
 
 本项目使用 Workers Free 与 SQLite Durable Objects，不依赖 R2、D1、KV 或付费推送。免费额度仍有 Cloudflare 平台上限；达到上限时服务可能不可用。容量限制可配置，不能把“免费”理解为无限流量。
 
-当前是开发预览，正式发行前仍需完成真实 Android 设备上的蓝牙、网络切换、后台、媒体和语音验收。源码保留的功能与已经验证的功能在功能文档中分别记录。
+当前 0.2.0 使用独立长期签名，按发行候选版本准备；正式发行前仍需完成真实 Android 设备上的蓝牙、网络切换、后台、媒体、语音和升级验收。下载以本仓库 [Releases](https://github.com/liaopinyi714/bitchat/releases) 为准，候选版不会被应用内更新自动选中。源码保留的功能与已验证的功能在功能文档中分别记录。

@@ -1106,6 +1106,7 @@ internal fun CashuPaymentChip(
     showActions: Boolean = true,
 ) {
     val context = LocalContext.current
+    val paymentDescription = stringResource(R.string.cashu_payment_description)
     val info = remember(token) { CashuTokenDecoder.decode(token) }
     val primaryLabel = listOfNotNull(info?.displayAmount, info?.mintHost)
         .joinToString(" · ")
@@ -1130,7 +1131,7 @@ internal fun CashuPaymentChip(
                 )
                 .semantics {
                     contentDescription = buildString {
-                        append(context.getString(R.string.cashu_payment_description))
+                        append(paymentDescription)
                         append(": ")
                         append(primaryLabel)
                         info?.memo?.let { append(", $it") }

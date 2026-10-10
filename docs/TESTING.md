@@ -1,6 +1,6 @@
 # 验证记录
 
-当前版本是开发预览。以下结果来自本地构建和合成测试数据，不代表已经完成真实手机、运营商网络或正式 Cloudflare 账号上的验收。
+当前 0.2.0 是长期签名发行候选。以下结果来自本地构建和合成测试数据，不代表已经完成真实手机、运营商网络或正式 Cloudflare 账号上的验收。
 
 ## 已执行
 
@@ -8,13 +8,22 @@
 | --- | --- |
 | Android 手机通用 debug APK | 构建成功 |
 | Wear debug APK | 构建成功 |
-| 手机 JVM / Robolectric 测试 | 636 项，0 失败，3 跳过 |
-| Wear JVM / Robolectric 测试 | 196 项，0 失败 |
+| 手机 JVM / Robolectric 测试 | 648 项，0 失败，3 项既有跳过 |
+| Wear JVM / Robolectric 测试 | 208 项，0 失败 |
 | clientRewriteContractTest | 通过 |
 | Worker TypeScript 检查 | 通过 |
 | Worker 在 Workerd 中的测试 | 22 项通过 |
-| 本分支文档链接与标题锚点 | 14 个文档通过，包含 Android 模块入口 |
-| 锁文件依赖安装及 Wrangler dry-run | 通过，未实际部署 |
+| 本分支文档链接与标题锚点 | 17 个文档通过，包含 Android 模块入口 |
+| Wrangler dry-run | 通过，未实际部署；使用已有锁定依赖 |
+| Arti 原生库 | 四种架构 SHA-256 与仓库清单一致，宿主路径检查通过 |
+| 长期签名 APK | 五种产物通过签名、公共证书、v3 迁移链与旧版承接数据检查；不允许旧签名回退 |
+| 精简产物内容 | 语言、字体、离线扫码、反射字段、JNI、各架构代码资源一致，定位权限缺失，64 位 ELF / ZIP 16 KB 对齐通过 |
+
+ARM64 发行 APK 为 26,174,908 字节，通用包为 58,108,540 字节。0.1.6 基线对比确认原生库和静态资产不变，排除随新 DEX 生成的两份 ART 配置文件。证书指纹不匹配的负例被拒绝。发行密钥仅在维护者本地保管，公开证书和轮换证明不含私钥。
+
+0.2.0 新增 12 项蓝牙退出和回调回归，在手机 / Wear 完整测试中执行；客户端、服务端和 tracker 的停止清理均覆盖了取消协程或权限撤销边界。另补充待协商 GATT、停止后迟到 MTU、重启后的旧服务端回调和停止后的连接拒绝。没有用任意等待或真实附近设备驱动这些回归。
+
+完整手机 / Wear debug、手机 R8 release、Lint 和 clientRewriteContractTest 已重新执行。Worker TypeScript、22 项 Workerd 测试和 dry-run 再次通过。Windows 环境没有可用 Bash，因此 Arti 校验使用 Node 标准库执行与仓库 shell 脚本等价的 SHA-256 和宿主路径检查。
 
 新增客户端测试覆盖频道名称规范、独立计算的房间 ID / PBKDF2 / 密钥摘要向量、公开封装向量、AES-GCM 篡改和降级拒绝、密码变更，以及 X25519 / HMAC 身份证明。Worker 测试覆盖双密钥身份认证、重放和冒名拒绝、房间与邮箱路由、创建者权限、休眠后状态、密码变更、限流、离线队列确认和过期、同房间定向历史同步。
 
@@ -58,6 +67,8 @@ python3 ../tools/verify-apk.py --apk-dir app/build/outputs/apk/release --unsigne
 
 Lint 已运行，但当前报告仍有错误和警告。上游配置的 `abortOnError=false` 使 Gradle 任务成功结束，这不能解释为 Lint 零错误。报告主要涉及既有翻译、权限、数量资源和 Compose 检查；正式发行前应逐项审查，不能简单关闭检查或把整份报告加入 baseline。
 
+0.2.0 报告：手机 **453 errors / 418 warnings / 17 hints**，Wear **27 errors / 50 warnings / 10 hints**；不含 baseline 过滤项目。相比 0.1.6，手机错误减少 15 项，Wear 减少 10 项。没有关闭检查或扩大 baseline。其他语言的 MissingTranslation 仍占手机错误的大多数，其余权限和数量资源等既有问题没有全部消除。
+
 0.1.5 本地报告仍为：手机 468 errors / 364 warnings / 17 hints，Wear 37 errors / 51 warnings / 10 hints；不含被 baseline 过滤的项目。中文字符串已补齐，新增界面文案支持英文和中文，其他语言仍可能使用英文回退。0.1.2 为 419 errors，0.1.3 增加的 49 条 MissingTranslation 来自调试界面与频道提示在其他语言中的缺失；未屏蔽检查或扩大 baseline。本次变更没有增加 Lint 错误；这不替代完整项目审查。
 
 0.1.6 完整回归：手机 636 项（3 项既有跳过），Wear 196 项，均无失败。手机 Lint 为 468 errors / 418 warnings / 17 hints，Wear 为 37 errors / 51 warnings / 10 hints。手机错误数量保持不变；提高最低 SDK 后，保留的兼容分支带来更多过时版本判断警告，未通过关闭检查或扩大 baseline 隐藏。五种签名精简 APK 已通过实际内容检查、旧包资源对比和覆盖签名检查；检查工具也拒绝了故意移除原生库的本地负例。
@@ -69,6 +80,6 @@ Lint 已运行，但当前报告仍有错误和警告。上游配置的 `abortOn
 - 实际部署到 `chat.123456714.xyz`，以及大陆移动 / 电信 / 联通与家庭 Wi-Fi 的可达性验证。
 - 两台真实 Android 手机上的端到端聊天、BLE / Wi-Fi Aware、网络切换、后台重启、媒体与实时 PTT。
 - 物理 Mesh Lab 和仪器测试；因此不能把此预览作为通过生产发布门槛的版本。
-- 正式签名、正式发行更新、可重现 APK 双重构建，以及 Cashu 的外部 mint / 资金流程。
+- 真机安装长期签名 APK、覆盖升级后的数据保留、正式发行更新、可重现 APK 双重构建，以及 Cashu 的外部 mint / 资金流程。
 
 部署完成后按 [Android 真机验收](ANDROID.md#必须完成的真机验收) 执行。仅 `/health` 返回正常不能确认聊天和后台功能已经可用。

@@ -28,7 +28,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.bitchat.android.ui.theme.BitchatFontFamily
 import com.bitchat.android.R
@@ -136,12 +135,12 @@ private fun FileProgressBars(
     val filledBars = (progress * bars).toInt()
 
     // Create a matrix-style progress bar string
-    val ctx = LocalContext.current
+    val filled = stringResource(R.string.progress_filled)
+    val empty = stringResource(R.string.progress_empty)
     val progressString = buildString {
-        val brackets = ctx.getString(R.string.progress_bar_brackets, "", 0)
         append("[")
         for (i in 0 until bars) {
-            append(if (i < filledBars) ctx.getString(R.string.progress_filled) else ctx.getString(R.string.progress_empty))
+            append(if (i < filledBars) filled else empty)
         }
         append("] ")
         append("${(progress * 100).toInt()}%")

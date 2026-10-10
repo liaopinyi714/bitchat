@@ -55,5 +55,7 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew :app:assembleDebug :wear:assembleDebug :app:assembleRelease testDebugUnitTest lintDebug clientRewriteContractTest --no-daemon
+      - name: Verify pinned native libraries
+        run: bash tools/arti-build/verify-checksums.sh
       - name: Verify optimized phone APKs
         run: python3 ../tools/verify-apk.py --apk-dir app/build/outputs/apk/release --unsigned

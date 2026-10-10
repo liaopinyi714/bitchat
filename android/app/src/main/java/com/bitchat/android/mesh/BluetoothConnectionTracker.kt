@@ -5,8 +5,6 @@ import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.UUID
@@ -15,13 +13,12 @@ import java.util.UUID
  * Tracks all Bluetooth connections and handles cleanup
  */
 class BluetoothConnectionTracker(
-    private val connectionScope: CoroutineScope,
+    connectionScope: CoroutineScope,
     private val powerManager: PowerManager
 ) : MeshConnectionTracker(connectionScope, TAG) {
     
     companion object {
         private const val TAG = "BluetoothConnectionTracker"
-        private const val CLEANUP_DELAY = com.bitchat.android.util.AppConstants.Mesh.CONNECTION_CLEANUP_DELAY_MS
     }
     
     // Connection tracking - reduced memory footprint
@@ -55,8 +52,31 @@ class BluetoothConnectionTracker(
     
     override fun stop() {
         super.stop()
-        cleanupAllConnections()
-        clearAllConnections()
+        // Detach first: callbacks from closing links must not see live tracker entries.
+        val connections = synchronized(connectionStateLock) {
+            connectedDevices.values.mapNotNull { it.gatt }.distinct().also {
+                clearAllConnections()
+            }
+        }
+        // The owner cancels its scope immediately after stop(). Closing here also works
+        // after permission revocation or scope cancellation, without a delayed job leak.
+        connections.forEach { gatt ->
+            try {
+                gatt.disconnect()
+            } catch (_: SecurityException) {
+                Log.w(TAG, "Bluetooth permission revoked during disconnect")
+            } catch (_: RuntimeException) {
+                Log.w(TAG, "Bluetooth disconnect failed during shutdown")
+            } finally {
+                try {
+                    gatt.close()
+                } catch (_: SecurityException) {
+                    Log.w(TAG, "Bluetooth permission revoked during close")
+                } catch (_: RuntimeException) {
+                    Log.w(TAG, "Bluetooth close failed during shutdown")
+                }
+            }
+        }
     }
 
     // Abstract implementations
@@ -296,27 +316,6 @@ class BluetoothConnectionTracker(
             true
         } else {
             false
-        }
-    }
-    
-    /**
-     * Clean up all connections
-     */
-    private fun cleanupAllConnections() {
-        connectedDevices.values.forEach { deviceConn ->
-            deviceConn.gatt?.disconnect()
-        }
-        
-        connectionScope.launch {
-            delay(CLEANUP_DELAY)
-            
-            connectedDevices.values.forEach { deviceConn ->
-                try {
-                    deviceConn.gatt?.close()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error closing GATT during cleanup: ${e.message}")
-                }
-            }
         }
     }
     

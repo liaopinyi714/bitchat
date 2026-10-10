@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import struct
 import subprocess
 import xml.etree.ElementTree as ET
@@ -33,6 +34,25 @@ MODELS = {
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+def release_fingerprint():
+    properties = (ROOT / "android/gradle.properties").read_text(encoding="utf-8")
+    match = re.search(r"^BITCHAT_GITHUB_RELEASE_CERT_SHA256=([a-f0-9]{64})$", properties, re.M)
+    require(match, "Pinned release certificate unavailable")
+    return match.group(1)
+
+
+def verify_release_lineage(apk, baseline=None):
+    java_home = os.environ.get("JAVA_HOME")
+    java = str(Path(java_home) / "bin" / ("java.exe" if os.name == "nt" else "java")) if java_home else shutil.which("java")
+    require(java, "JDK 21 required for release lineage verification")
+    jar = Path(sdk_tool("apksigner")).parent / "lib/apksigner.jar"
+    args = [java, "--class-path", str(jar), str(ROOT / "tools/VerifyApkLineage.java"),
+            str(apk), release_fingerprint(), str(ROOT / "release/signing-lineage.base64")]
+    if baseline:
+        args.append(str(baseline))
+    run_tool(args)
 
 
 def uleb(data, offset):
@@ -99,10 +119,34 @@ def sdk_tool(name):
 
 
 def run_tool(args):
+    if Path(args[0]).name.lower() == "apksigner.bat":
+        # Avoid cmd.exe's second quoting pass, especially for password-file paths.
+        java_home = os.environ.get("JAVA_HOME")
+        java = str(Path(java_home) / "bin/java.exe") if java_home else shutil.which("java")
+        require(java, "JDK 21 required for APK signing")
+        args = [java, "-jar", str(Path(args[0]).parent / "lib/apksigner.jar"), *args[1:]]
     result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8",
                             errors="replace", check=False)
     require(result.returncode == 0, "Android SDK artifact check failed")
     return result.stdout
+
+
+def check_elf_alignment(data):
+    require(data[:6] == b"\x7fELF\x02\x01", "Invalid 64-bit native library")
+    offset = struct.unpack_from("<Q", data, 32)[0]
+    entry_size, count = struct.unpack_from("<HH", data, 54)
+    require(entry_size >= 56 and count > 0, "Invalid ELF program headers")
+    loads = 0
+    for index in range(count):
+        start = offset + index * entry_size
+        if struct.unpack_from("<I", data, start)[0] != 1:  # PT_LOAD
+            continue
+        file_offset, address = struct.unpack_from("<QQ", data, start + 8)
+        alignment = struct.unpack_from("<Q", data, start + 48)[0]
+        require(alignment >= 16384 and (address - file_offset) % 16384 == 0,
+                "Native library lacks 16 KB ELF load alignment")
+        loads += 1
+    require(loads > 0, "Native library has no load segments")
 
 
 def check_apk(path, expected_abis, signed):
@@ -114,6 +158,9 @@ def check_apk(path, expected_abis, signed):
         for abi in abis:
             for library in NATIVE:
                 require(f"lib/{abi}/{library}" in names, "Missing Tor/offline barcode library")
+        for name in names:
+            if name.startswith(("lib/arm64-v8a/", "lib/x86_64/")) and name.endswith(".so"):
+                check_elf_alignment(archive.read(name))
         classes = {}
         dex_bytes = 0
         for name in sorted(names):
@@ -148,7 +195,10 @@ def check_apk(path, expected_abis, signed):
 
     badging = run_tool([sdk_tool("aapt2"), "dump", "badging", str(path)])
     require("name='xyz.liaopinyi714.bitchat'" in badging, "Wrong application ID")
-    require("versionCode='7'" in badging and "versionName='0.1.6'" in badging, "Wrong version")
+    source = (ROOT / "android/app/build.gradle.kts").read_text(encoding="utf-8")
+    code = re.search(r"versionCode = (\d+)", source).group(1)
+    version = re.search(r'versionName = "([^"]+)"', source).group(1)
+    require(f"versionCode='{code}'" in badging and f"versionName='{version}'" in badging, "Wrong version")
     require(re.search(r"(?:sdkVersion|minSdkVersion):'34'", badging), "Wrong minimum Android SDK")
     require("targetSdkVersion:'37'" in badging, "Wrong target Android SDK")
     require("application-debuggable" not in badging, "Optimized APK is debuggable")
@@ -174,9 +224,11 @@ def check_apk(path, expected_abis, signed):
 
 
 def compare_baseline(baseline, optimized):
-    """Confirm every packaged native library and static asset retains the same bytes."""
+    """Compare native/static assets, excluding ART profiles regenerated from changed DEX."""
     with zipfile.ZipFile(baseline) as old, zipfile.ZipFile(optimized) as new:
         for name in old.namelist():
+            if name in {"assets/dexopt/baseline.prof", "assets/dexopt/baseline.profm"}:
+                continue
             if name.startswith(("lib/", "assets/", "org/bouncycastle/")):
                 require(name in new.namelist() and old.read(name) == new.read(name),
                         "Existing native library/static asset changed")
@@ -187,8 +239,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apk-dir", type=Path, required=True)
     parser.add_argument("--unsigned", action="store_true", help="Check ordinary unsigned release output")
+    parser.add_argument("--release", action="store_true", help="Require the pinned release key and upgrade lineage")
     parser.add_argument("--baseline", type=Path, help="Previous universal APK, kept local")
     args = parser.parse_args()
+    require(not (args.unsigned and args.release), "Unsigned APK cannot satisfy release signing checks")
     suffix = "-unsigned" if args.unsigned else ""
     outputs = {}
     reference_hashes, reference_certificate = None, None
@@ -201,10 +255,16 @@ def main():
             reference_hashes, reference_certificate = hashes, certificate
         require(hashes == reference_hashes, "ABI APKs contain different code/resources/assets")
         require(certificate == reference_certificate, "ABI APK signatures differ")
+        if args.release:
+            verify_release_lineage(apk, args.baseline)
+            with zipfile.ZipFile(apk) as archive:
+                require(any(re.fullmatch(r"classes\d*\.dex", name) and
+                            release_fingerprint().encode("ascii") in archive.read(name)
+                            for name in archive.namelist()), "APK does not contain the pinned release certificate")
         outputs[abi] = size
     if args.baseline:
         old_bytes = compare_baseline(args.baseline, universal)
-        if not args.unsigned:
+        if not args.unsigned and not args.release:
             signing = run_tool([sdk_tool("apksigner"), "verify", "--print-certs", str(args.baseline)])
             digest = re.search(r"certificate SHA-256 digest: ([a-fA-F0-9]+)", signing)
             require(digest and digest.group(1).lower() == reference_certificate,

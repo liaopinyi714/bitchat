@@ -467,9 +467,14 @@ class BluetoothConnectionManager(
     fun getDebugInfo(): String {
         return buildString {
             appendLine("=== Bluetooth Connection Manager ===")
-            appendLine("Bluetooth MAC Address: ${bluetoothAdapter?.address}")
+            appendLine("Bluetooth MAC Address: ${getLocalAdapterAddress()}")
             appendLine("Active: $isActive")
-            appendLine("Bluetooth Enabled: ${bluetoothAdapter?.isEnabled}")
+            val enabled = try {
+                bluetoothAdapter?.isEnabled
+            } catch (_: SecurityException) {
+                null
+            }
+            appendLine("Bluetooth Enabled: $enabled")
             appendLine("Has Permissions: ${permissionManager.hasBluetoothPermissions()}")
             appendLine("GATT Server Active: ${serverManager.getGattServer() != null}")
             appendLine()
