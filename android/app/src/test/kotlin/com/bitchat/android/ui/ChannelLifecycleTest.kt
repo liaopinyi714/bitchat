@@ -19,7 +19,7 @@ import javax.crypto.spec.SecretKeySpec
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [28], application = Application::class)
+@Config(sdk = [34], application = Application::class)
 class ChannelLifecycleTest {
     private val scope = TestScope()
     private val context = ApplicationProvider.getApplicationContext<Application>()

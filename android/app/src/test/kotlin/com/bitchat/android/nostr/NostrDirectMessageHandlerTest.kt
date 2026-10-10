@@ -35,7 +35,7 @@ import org.robolectric.annotation.Config
 import java.util.UUID
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [Build.VERSION_CODES.P], manifest = Config.NONE)
+@Config(sdk = [Build.VERSION_CODES.UPSIDE_DOWN_CAKE], manifest = Config.NONE)
 @OptIn(ExperimentalCoroutinesApi::class)
 class NostrDirectMessageHandlerTest {
     private val gson = Gson()

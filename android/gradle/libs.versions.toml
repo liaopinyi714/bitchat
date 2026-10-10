@@ -3,7 +3,7 @@
 agp = "9.3.1"
 kotlin = "2.4.10"
 compileSdk = "37"
-minSdk = "26" # API 26 for proper BLE support
+minSdk = "34" # Phone: Android 14+. Wear keeps its independent minimum SDK.
 targetSdk = "37"
 buildTools = "37.0.0"
 

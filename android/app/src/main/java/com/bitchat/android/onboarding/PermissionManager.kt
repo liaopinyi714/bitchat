@@ -45,8 +45,8 @@ class PermissionManager(private val context: Context) {
     }
 
     /**
-     * Runtime permissions for the Wi‑Fi Aware transport, version-gated because neither exists
-     * at minSdk 26 — requesting an unknown permission comes back permanently denied.
+     * Runtime permissions for the Wi-Fi Aware transport. Keep version gates for the
+     * retained compatibility code and Android 17's additional local-network permission.
      *
      * ACCESS_LOCAL_NETWORK is defensive: Android 17 gates local network access, and the
      * transport reaches peers over link-local IPv6 sockets. It is granted separately from

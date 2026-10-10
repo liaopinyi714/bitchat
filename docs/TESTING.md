@@ -36,6 +36,8 @@ JVM 测试使用仅位于 `src/test` 的临时内存密钥库和合成密钥，�
 
 代码检查和文档修正范围见 [维护记录](REVIEW.md)。本次没有修改 UI 布局、Noise 算法、频道加密格式或 Worker 存储结构。未执行双机改名、真机观感和实际网络重连，不能仅靠这些合成回归宣称全部交互与原版相同。
 
+0.1.6 将手机最低版本提高到 API 34，Robolectric 回归改用 Android 14 / 15；权限测试改为支持系统上的附近设备、在线跳过和定位权限缺失。共享核心测试继续覆盖独立逻辑，Wear 的最低 SDK 保持 API 33。构建检查新增 R8 精简包，另使用 `tools/verify-apk.py` 检查五种 APK 的实际 DEX、原生库、静态资产、语言、字体、离线扫码、持久化字段、16 KB ZIP 对齐与签名。旧通用包对比确认原生库和静态资产字节相同，各架构包代码与资源相同；这些静态检查不替代精简包的真机启动、数据迁移与全功能验收。
+
 复查命令：
 
 ```sh
@@ -48,7 +50,8 @@ pnpm dry-run
 
 ```sh
 cd android
-./gradlew :app:assembleDebug :wear:assembleDebug testDebugUnitTest lintDebug clientRewriteContractTest --no-daemon
+./gradlew :app:assembleDebug :wear:assembleDebug :app:assembleRelease testDebugUnitTest lintDebug clientRewriteContractTest --no-daemon
+python3 ../tools/verify-apk.py --apk-dir app/build/outputs/apk/release --unsigned
 ```
 
 ## Lint 的限制
@@ -56,6 +59,8 @@ cd android
 Lint 已运行，但当前报告仍有错误和警告。上游配置的 `abortOnError=false` 使 Gradle 任务成功结束，这不能解释为 Lint 零错误。报告主要涉及既有翻译、权限、数量资源和 Compose 检查；正式发行前应逐项审查，不能简单关闭检查或把整份报告加入 baseline。
 
 0.1.5 本地报告仍为：手机 468 errors / 364 warnings / 17 hints，Wear 37 errors / 51 warnings / 10 hints；不含被 baseline 过滤的项目。中文字符串已补齐，新增界面文案支持英文和中文，其他语言仍可能使用英文回退。0.1.2 为 419 errors，0.1.3 增加的 49 条 MissingTranslation 来自调试界面与频道提示在其他语言中的缺失；未屏蔽检查或扩大 baseline。本次变更没有增加 Lint 错误；这不替代完整项目审查。
+
+0.1.6 完整回归：手机 636 项（3 项既有跳过），Wear 196 项，均无失败。手机 Lint 为 468 errors / 418 warnings / 17 hints，Wear 为 37 errors / 51 warnings / 10 hints。手机错误数量保持不变；提高最低 SDK 后，保留的兼容分支带来更多过时版本判断警告，未通过关闭检查或扩大 baseline 隐藏。五种签名精简 APK 已通过实际内容检查、旧包资源对比和覆盖签名检查；检查工具也拒绝了故意移除原生库的本地负例。
 
 本次修正了旧 Android 上的接收器注册和图片保存，并把文件保存接入系统文件选择器。完整报告仅保留在本地构建目录，不上传设备或开发环境日志。
 

@@ -22,7 +22,7 @@ import org.robolectric.annotation.Config
 import java.util.Locale
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [28], application = Application::class)
+@Config(sdk = [34], application = Application::class)
 class ChineseInterfaceBehaviorTest {
     private fun localizedContext(tag: String): Context {
         val context = ApplicationProvider.getApplicationContext<Application>()

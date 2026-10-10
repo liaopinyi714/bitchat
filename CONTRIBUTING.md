@@ -18,7 +18,8 @@ Android 使用 JDK 21，SDK 版本以 `android/gradle/libs.versions.toml` 为准
 
 ```sh
 cd android
-./gradlew :app:assembleDebug :wear:assembleDebug testDebugUnitTest lintDebug clientRewriteContractTest --no-daemon
+./gradlew :app:assembleDebug :wear:assembleDebug :app:assembleRelease testDebugUnitTest lintDebug clientRewriteContractTest --no-daemon
+python3 ../tools/verify-apk.py --apk-dir app/build/outputs/apk/release --unsigned
 ```
 
 Windows 使用 `gradlew.bat`。建议用短 ASCII 路径运行 Android 工具链；不把个人机器路径写进源码。Lint 任务成功不代表报告没有错误，见 [当前限制](docs/TESTING.md#lint-的限制)。

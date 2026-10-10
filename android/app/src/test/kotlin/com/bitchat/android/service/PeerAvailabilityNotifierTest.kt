@@ -125,7 +125,7 @@ class PeerAvailabilityTrackerTest {
 }
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [32])
+@Config(sdk = [34])
 @OptIn(ExperimentalCoroutinesApi::class)
 class PeerAvailabilityNotifierTest {
     private lateinit var context: Context

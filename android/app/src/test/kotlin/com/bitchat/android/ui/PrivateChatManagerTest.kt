@@ -24,7 +24,7 @@ import org.robolectric.annotation.Config
 import java.util.Date
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [Build.VERSION_CODES.P], manifest = Config.NONE)
+@Config(sdk = [Build.VERSION_CODES.UPSIDE_DOWN_CAKE], manifest = Config.NONE)
 @OptIn(ExperimentalCoroutinesApi::class)
 class PrivateChatManagerTest {
     private lateinit var state: ChatState

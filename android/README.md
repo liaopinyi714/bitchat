@@ -6,7 +6,7 @@
 
 ## 使用和功能
 
-- 手机最低 Android 8.0。BLE 和受支持设备上的 Wi-Fi Aware 保留；在线频道不依赖定位权限。旧 Android 的本地发现限制见 [权限说明](../docs/ANDROID.md)。
+- 手机最低 Android 14（API 34）。BLE 和受支持设备上的 Wi-Fi Aware 保留；本分支不声明定位权限。Wear 的最低版本单独保持 API 33。
 - 输入频道名称创建或加入，没有地图、固定房间名单或全站搜索。公开频道正文可被中继读取；密码频道使用 PBKDF2-HMAC-SHA256 + AES-256-GCM。
 - Noise 私聊、验证、回执、收藏、拉黑、图片、文件、语音和 panic 保留上游流程。在线传输及后台表现仍需真实设备验收。
 - 手机在线中继默认使用 `chat.123456714.xyz`，由仓库所有者自行部署。Wear 模块保留上游本地功能，尚未接入在线频道。
@@ -21,7 +21,7 @@
 ./gradlew :app:assembleDebug :wear:assembleDebug testDebugUnitTest lintDebug clientRewriteContractTest --no-daemon
 ```
 
-Windows 使用 `gradlew.bat`，建议用短 ASCII 路径构建。手机调试 APK 位于 `app/build/outputs/apk/debug/app-universal-debug.apk`。正式签名、覆盖安装、发行资产命名和真机验收见 [Android 构建与发行](../docs/ANDROID.md)。调试签名不保证跨构建机器一致。
+Windows 使用 `gradlew.bat`，建议用短 ASCII 路径构建。手机调试 APK 位于 `app/build/outputs/apk/debug/app-universal-debug.apk`。日常安装使用 [精简安装包](../docs/ANDROID.md#精简安装包)，调试包用于开发和物理 Mesh Lab。正式签名、覆盖安装、发行资产命名和真机验收见 [Android 构建与发行](../docs/ANDROID.md)。调试签名不保证跨构建机器一致。
 
 `app/` 是共享源码的来源；Wear 的 `syncSharedAppSources` 生成共享文件，不手动复制或修改生成目录。开发前阅读 [仓库规则](AGENTS.md) 和 [贡献说明](../CONTRIBUTING.md)。
 

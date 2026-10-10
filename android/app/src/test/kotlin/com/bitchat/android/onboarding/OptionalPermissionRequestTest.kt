@@ -14,7 +14,7 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [33])
+@Config(sdk = [34])
 class OptionalPermissionRequestTest {
     private lateinit var application: Application
 

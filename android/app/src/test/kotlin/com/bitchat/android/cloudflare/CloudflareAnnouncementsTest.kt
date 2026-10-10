@@ -29,7 +29,7 @@ import java.util.Base64
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [28], application = InMemoryKeyStoreApplication::class)
+@Config(sdk = [34], application = InMemoryKeyStoreApplication::class)
 class CloudflareAnnouncementsTest {
     private val scope = TestScope()
     private val context = ApplicationProvider.getApplicationContext<Application>()

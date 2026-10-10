@@ -19,7 +19,7 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [33], application = Application::class)
+@Config(sdk = [34], application = Application::class)
 class NamedChannelPermissionsTest {
     private lateinit var application: Application
 
@@ -36,13 +36,13 @@ class NamedChannelPermissionsTest {
     }
 
     @Test
-    @Config(sdk = [31])
-    fun `Android 12 discovers BLE peers without location permission`() {
+    fun `Android 14 discovers BLE peers without location permission`() {
         assertModernPermissions()
     }
 
     @Test
-    fun `Android 13 discovers BLE peers without location permission`() {
+    @Config(sdk = [35])
+    fun `Android 15 discovers BLE peers without location permission`() {
         assertModernPermissions()
     }
 
@@ -60,16 +60,19 @@ class NamedChannelPermissionsTest {
     }
 
     @Test
-    @Config(sdk = [26])
-    fun `Android 8 retains its system BLE scan permission only`() = assertLegacyPermissions()
+    fun `nearby permissions remain optional for online startup`() {
+        val manager = PermissionManager(application)
+        shadowOf(application).denyPermissions(*manager.getRequiredPermissions().toTypedArray())
+        assertFalse(manager.areRequiredPermissionsGranted())
+        assertFalse(manager.needsBackgroundLocationPermission())
+        assertNull(manager.getBackgroundLocationPermission())
+    }
 
     @Test
-    @Config(sdk = [30])
-    fun `Android 11 retains its system BLE scan permission only`() = assertLegacyPermissions()
-
-    private fun assertLegacyPermissions() {
+    fun `supported systems never offer legacy location permissions`() {
         val manager = PermissionManager(application)
-        assertTrue(manager.getRequiredPermissions().contains(Manifest.permission.ACCESS_FINE_LOCATION))
+        assertFalse(manager.getRequiredPermissions().contains(Manifest.permission.ACCESS_FINE_LOCATION))
+        assertFalse(manager.getRequiredPermissions().contains(Manifest.permission.ACCESS_COARSE_LOCATION))
         assertFalse(manager.needsBackgroundLocationPermission())
         assertNull(manager.getBackgroundLocationPermission())
         assertTrue(manager.getMissingBackgroundLocationPermission().isEmpty())

@@ -21,6 +21,12 @@ require(
     "BITCHAT_GITHUB_RELEASE_CERT_SHA256 must be a SHA-256 certificate fingerprint"
 }
 
+// Opt-in, local installation of the optimized app with the development certificate.
+// Normal release builds remain unsigned; formal releases use the maintainer's key.
+val previewSigning = providers.gradleProperty("bitchat.previewSigning")
+    .map { it.toBooleanStrict() }
+    .orElse(false)
+
 android {
     namespace = "com.bitchat.android"
     compileSdk = libs.versions.compileSdk.get().toInt()
@@ -30,8 +36,8 @@ android {
         applicationId = "xyz.liaopinyi714.bitchat"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 6
-        versionName = "0.1.5"
+        versionCode = 7
+        versionName = "0.1.6"
         buildConfigField("String", "RELAY_URL", "\"wss://chat.123456714.xyz\"")
         buildConfigField(
             "String",
@@ -70,6 +76,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (previewSigning.get()) {
+                signingConfig = signingConfigs.getByName("debug")
+            }
             vcsInfo {
                 // BUILDINFO.json and attestations carry the verified commit
                 // without depending on host-specific Git/worktree paths.
@@ -78,7 +87,7 @@ android {
         }
     }
 
-    // APK splits for GitHub releases - creates arm64, x86_64, and universal APKs
+    // Each ABI APK has identical app features and only that ABI's native libraries.
     // AAB for Play Store handles architecture distribution automatically
     // Auto-detects: splits enabled for assemble tasks, disabled for bundle tasks
     // Works in Android Studio GUI and CLI without needing extra properties
@@ -180,11 +189,8 @@ dependencies {
     // HTTP Server for hotspot APK sharing
     implementation(libs.nanohttpd)
 
-    // Arti (Tor in Rust) Android bridge - custom build from latest source
-    // Built with rustls, 16KB page size support, and onio//un service client
-    // Native libraries are in src/tor/jniLibs/ (extracted from arti-custom.aar)
-    // Only included in tor flavor to reduce APK size for standard builds
-    // Note: AAR is kept in libs/ for reference, but libraries loaded from jniLibs/
+    // Arti (Tor in Rust): native libraries in src/main/jniLibs/ for all four ABIs.
+    // ABI splits avoid shipping other architectures without removing Tor support.
 
     // Google Play Services Location
     implementation(libs.gms.location)

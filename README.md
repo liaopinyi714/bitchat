@@ -37,7 +37,7 @@ UPSTREAM.md          来源、版本和修改范围
 LICENSE.md           GPL-3.0
 ```
 
-最低 Android 8.0；Wi-Fi Aware 取决于设备支持。Wear 保留上游本地 mesh 功能，在线频道目前仅接入手机端。
+手机最低 Android 14（API 34）；Wi-Fi Aware 取决于设备支持。Wear 最低 API 33，保留上游本地 mesh 功能，在线频道目前仅接入手机端。日常安装推荐 [精简 ARM64 包](docs/ANDROID.md#精简安装包)，开发调试包体积更大。
 
 本项目使用 Workers Free 与 SQLite Durable Objects，不依赖 R2、D1、KV 或付费推送。免费额度仍有 Cloudflare 平台上限；达到上限时服务可能不可用。容量限制可配置，不能把“免费”理解为无限流量。
 

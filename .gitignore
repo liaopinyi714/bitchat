@@ -9,4 +9,6 @@ local.properties
 *.log
 dist/
 coverage/
+__pycache__/
+*.pyc
 

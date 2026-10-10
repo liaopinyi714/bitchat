@@ -17,6 +17,13 @@
 -keep class com.bitchat.android.nostr.** { *; }
 -keep class com.bitchat.android.identity.** { *; }
 
+# Gson reads and writes these persisted models reflectively. Preserve existing JSON
+# field names when upgrading an unminified installation to an optimized APK.
+-keep class com.bitchat.android.services.SeenMessageStore$StorePayload { *; }
+-keep class com.bitchat.android.geohash.LocationChannelManager$PersistedChannel { *; }
+-keep class com.bitchat.android.geohash.OpenStreetMapGeocoderProvider$OsmResponse { *; }
+-keep class com.bitchat.android.geohash.OpenStreetMapGeocoderProvider$OsmAddress { *; }
+
 # Room loads generated database implementations by name and invokes their no-argument
 # constructors reflectively. R8 full-mode can otherwise optimize away WorkDatabase_Impl's
 # constructor, causing AndroidX Startup to crash before Application.onCreate.

@@ -54,4 +54,6 @@ jobs:
       - name: Build and test
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug :wear:assembleDebug testDebugUnitTest lintDebug clientRewriteContractTest --no-daemon
+          ./gradlew :app:assembleDebug :wear:assembleDebug :app:assembleRelease testDebugUnitTest lintDebug clientRewriteContractTest --no-daemon
+      - name: Verify optimized phone APKs
+        run: python3 ../tools/verify-apk.py --apk-dir app/build/outputs/apk/release --unsigned
