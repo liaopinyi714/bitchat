@@ -58,6 +58,7 @@ WebSocket 使用 DO Hibernation API。空闲时不运行服务端轮询定时器
 
 - 推送 main 后，Workers Builds 自动检查和部署。更新前查看迁移变更；不要删除或复用已经应用过的迁移标签。
 - 构建找不到 Wrangler：检查根目录是否为 worker，以及 pnpm 安装步骤是否成功。
+- `ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND`：构建命令运行在仓库根目录；进入 Worker 的 Settings → Builds，把 Root directory 设为 `worker` 后保存，再重试构建。`pnpm check && pnpm test` 保持不变，真正的清单在 `worker/package.json`。
 - 提示 Worker 名称不一致：统一控制台名称和 `wrangler.jsonc` 的 `name`。
 - 提示 DO 配置不支持 Free：确认使用 `new_sqlite_classes`，不要改成旧的 `new_classes`。
 - 健康检查通过但应用离线：检查 HTTPS 证书、子域名、客户端 RELAY_URL 和当地网络连通性。

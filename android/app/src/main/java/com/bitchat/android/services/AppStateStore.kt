@@ -50,6 +50,15 @@ object AppStateStore {
 
     private val _nickname = MutableStateFlow("")
     val nickname: StateFlow<String> = _nickname.asStateFlow()
+    private var localPeerID: String? = null
+
+    fun setLocalPeerID(peerID: String) {
+        synchronized(this) { localPeerID = peerID.takeIf(String::isNotBlank) }
+    }
+
+    internal fun isLocalMessage(message: BitchatMessage): Boolean = synchronized(this) {
+        message.isFromLocalPeer(localPeerID, _nickname.value)
+    }
 
     private val _selectedPrivateChatPeer = MutableStateFlow<String?>(null)
     val selectedPrivateChatPeer: StateFlow<String?> = _selectedPrivateChatPeer.asStateFlow()
@@ -324,7 +333,7 @@ object AppStateStore {
 
         val isRead = forceRead ||
             msg.sender == "system" ||
-            msg.sender == _nickname.value ||
+            isLocalMessage(msg) ||
             _selectedPrivateChatPeer.value
                 ?.let(ContactDirectory::canonicalConversationId)
                 ?.equals(conversationID, ignoreCase = true) == true
@@ -338,7 +347,7 @@ object AppStateStore {
         val aliases = privateConversationAliases(peerID, conversationID)
         val displayName = ContactDirectory.resolve(conversationID).displayName
             ?: msg.sender.takeUnless {
-                it.isBlank() || it == "system" || it == _nickname.value
+                it.isBlank() || it == "system" || isLocalMessage(msg)
             }
         displayName
             ?.takeUnless {
@@ -367,7 +376,7 @@ object AppStateStore {
         val existingMessages = _privateMessages.value[conversationID].orEmpty()
         val isRead = forceRead ||
             msg.sender == "system" ||
-            msg.sender == _nickname.value ||
+            isLocalMessage(msg) ||
             _selectedPrivateChatPeer.value
                 ?.let(ContactDirectory::canonicalConversationId)
                 ?.equals(conversationID, ignoreCase = true) == true
@@ -377,7 +386,7 @@ object AppStateStore {
                 .lastOrNull { candidate ->
                     candidate.sender.isNotBlank() &&
                         candidate.sender != "system" &&
-                        candidate.sender != _nickname.value
+                        !isLocalMessage(candidate)
                 }
                 ?.sender
         return PendingPrivateMessagePersistence(
@@ -762,7 +771,7 @@ object AppStateStore {
             unreadMessageCount = messages.count { message ->
                 message.id !in readIDs &&
                     message.sender != "system" &&
-                    message.sender != _nickname.value
+                    !isLocalMessage(message)
             }
         )
     }
@@ -871,6 +880,7 @@ object AppStateStore {
             _privateConversationDisplayNames.value = emptyMap()
             _channelMessages.value = emptyMap()
             _nickname.value = ""
+            localPeerID = null
             _selectedPrivateChatPeer.value = null
         }
     }

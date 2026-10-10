@@ -3,7 +3,7 @@ import { dirname, resolve, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const files = ["README.md", "CONTRIBUTING.md", "SECURITY.md", "CHANGELOG.md", "UPSTREAM.md",
+const files = ["README.md", "android/README.md", "CONTRIBUTING.md", "SECURITY.md", "CHANGELOG.md", "UPSTREAM.md",
     ...readdirSync(resolve(root, "docs")).filter((name) => name.endsWith(".md")).map((name) => `docs/${name}`)];
 const anchors = new Map();
 

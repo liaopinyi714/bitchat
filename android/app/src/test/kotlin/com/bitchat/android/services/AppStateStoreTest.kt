@@ -25,6 +25,45 @@ class AppStateStoreTest {
     }
 
     @Test
+    fun `a different identity with the local nickname remains unread`() {
+        AppStateStore.setLocalPeerID("local-peer")
+        AppStateStore.setNickname("shared-name")
+        val incoming = BitchatMessage(id = "same-name-incoming", sender = "shared-name",
+            content = "hello", timestamp = Date(1), isPrivate = true, senderPeerID = "peer-a")
+
+        assertTrue(AppStateStore.addPrivateMessage("peer-a", incoming))
+        assertEquals(mapOf("peer-a" to 1), AppStateStore.unreadPrivateMessageCounts.value)
+        assertFalse(incoming.id in AppStateStore.readPrivateMessageIDs.value)
+        assertEquals("shared-name", AppStateStore.privateConversationDisplayNames.value["peer-a"])
+    }
+
+    @Test
+    fun `an outgoing message stays read after a nickname change`() {
+        AppStateStore.setLocalPeerID("local-peer")
+        AppStateStore.setNickname("after")
+        val outgoing = BitchatMessage(id = "old-name-outgoing", sender = "before",
+            content = "hello", timestamp = Date(1), isPrivate = true, senderPeerID = "local-peer")
+
+        assertTrue(AppStateStore.addPrivateMessage("peer-a", outgoing))
+        assertTrue(AppStateStore.unreadPrivateMessageCounts.value.isEmpty())
+        assertTrue(outgoing.id in AppStateStore.readPrivateMessageIDs.value)
+        assertFalse(AppStateStore.privateConversationDisplayNames.value.containsKey("peer-a"))
+    }
+
+    @Test
+    fun `clearing state discards local identity before it is rebuilt`() {
+        AppStateStore.setLocalPeerID("before-peer")
+        AppStateStore.clear()
+        AppStateStore.setLocalPeerID("after-peer")
+        AppStateStore.setNickname("shared-name")
+        val oldIdentity = BitchatMessage(id = "old-identity", sender = "shared-name",
+            content = "hello", timestamp = Date(1), isPrivate = true, senderPeerID = "before-peer")
+
+        assertTrue(AppStateStore.addPrivateMessage("peer-a", oldIdentity))
+        assertEquals(mapOf("peer-a" to 1), AppStateStore.unreadPrivateMessageCounts.value)
+    }
+
+    @Test
     fun `public timeline collapses request sync replay even when android message ids differ`() {
         val timestamp = Date(1_700_000_000_000L)
         val originalDelivery = BitchatMessage(

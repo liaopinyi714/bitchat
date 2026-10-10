@@ -8,12 +8,12 @@
 | --- | --- |
 | Android 手机通用 debug APK | 构建成功 |
 | Wear debug APK | 构建成功 |
-| 手机 JVM / Robolectric 测试 | 628 项，0 失败，3 跳过 |
+| 手机 JVM / Robolectric 测试 | 636 项，0 失败，3 跳过 |
 | Wear JVM / Robolectric 测试 | 196 项，0 失败 |
 | clientRewriteContractTest | 通过 |
 | Worker TypeScript 检查 | 通过 |
 | Worker 在 Workerd 中的测试 | 22 项通过 |
-| 本分支文档链接与标题锚点 | 12 个文档通过 |
+| 本分支文档链接与标题锚点 | 14 个文档通过，包含 Android 模块入口 |
 | 锁文件依赖安装及 Wrangler dry-run | 通过，未实际部署 |
 
 新增客户端测试覆盖频道名称规范、独立计算的房间 ID / PBKDF2 / 密钥摘要向量、公开封装向量、AES-GCM 篡改和降级拒绝、密码变更，以及 X25519 / HMAC 身份证明。Worker 测试覆盖双密钥身份认证、重放和冒名拒绝、房间与邮箱路由、创建者权限、休眠后状态、密码变更、限流、离线队列确认和过期、同房间定向历史同步。
@@ -31,6 +31,10 @@ JVM 测试使用仅位于 `src/test` 的临时内存密钥库和合成密钥，�
 调试界面的 47 个提取文案和本次 2 个频道提示均提供英文、通用中文和繁体中文资源，由已有的覆盖和格式契约检查。安装包信息在后台读取，中文标签随应用语言更新。
 
 0.1.4 新增 5 项昵称回归：公共聊天、命名频道和私聊在改名后开始新的发送者标签；旧消息保留发送时昵称并继续属于本机身份；同名的其他身份不能被标记为自己，仍保留发送者交互。修复前新增用例中的 3 项失败，修复后完整手机与 Wear 测试通过。手机 / Wear debug APK、Lint 和 clientRewriteContractTest 已重新运行；中继代码及协议未变更，Worker 验证记录沿用 0.1.3 的结果。尚未执行真机界面及双机昵称同步验收。
+
+0.1.5 新增 8 项回归，覆盖失败连接在退避期的迟到 challenge / ready、无共用频道的已知私聊对端收到签名昵称公告、停止后的公告拒绝、同名消息未读、本机旧昵称消息归属、清除后的身份重建，以及 UI / 数据库未读一致性。三个缺陷在修复前分别由 6 项用例确认；公告测试修正测试密钥库配置后再确认其功能失败。修复后重跑完整手机 / Wear 测试、APK 构建、Lint、clientRewriteContractTest、Worker TypeScript / 22 项 Workerd 测试及 Wrangler dry-run。没有实际部署。测试内存密钥库不构成真实 Android Keystore 验证。
+
+代码检查和文档修正范围见 [维护记录](REVIEW.md)。本次没有修改 UI 布局、Noise 算法、频道加密格式或 Worker 存储结构。未执行双机改名、真机观感和实际网络重连，不能仅靠这些合成回归宣称全部交互与原版相同。
 
 复查命令：
 
@@ -51,7 +55,7 @@ cd android
 
 Lint 已运行，但当前报告仍有错误和警告。上游配置的 `abortOnError=false` 使 Gradle 任务成功结束，这不能解释为 Lint 零错误。报告主要涉及既有翻译、权限、数量资源和 Compose 检查；正式发行前应逐项审查，不能简单关闭检查或把整份报告加入 baseline。
 
-0.1.3 本地报告：手机 468 errors / 364 warnings / 17 hints，Wear 37 errors / 51 warnings / 10 hints；不含被 baseline 过滤的项目。中文字符串已补齐，新增界面文案支持英文和中文，其他语言仍可能使用英文回退。0.1.2 为 419 errors，本次增加 49 条 MissingTranslation，来自调试界面与频道提示在其他语言中的缺失；未屏蔽检查或扩大 baseline。本次修改的 Kotlin 代码未报告 Error；这不替代完整项目审查。
+0.1.5 本地报告仍为：手机 468 errors / 364 warnings / 17 hints，Wear 37 errors / 51 warnings / 10 hints；不含被 baseline 过滤的项目。中文字符串已补齐，新增界面文案支持英文和中文，其他语言仍可能使用英文回退。0.1.2 为 419 errors，0.1.3 增加的 49 条 MissingTranslation 来自调试界面与频道提示在其他语言中的缺失；未屏蔽检查或扩大 baseline。本次变更没有增加 Lint 错误；这不替代完整项目审查。
 
 本次修正了旧 Android 上的接收器注册和图片保存，并把文件保存接入系统文件选择器。完整报告仅保留在本地构建目录，不上传设备或开发环境日志。
 

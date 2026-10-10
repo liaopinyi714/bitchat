@@ -166,7 +166,7 @@ class MessageManager(private val state: ChatState, private val context: Context)
         if (
             !forceRead &&
             selectedConversationID != conversationID &&
-            message.sender != state.getNicknameValue()
+            !com.bitchat.android.services.AppStateStore.isLocalMessage(message)
         ) {
             val currentUnread = state.getUnreadPrivateMessagesValue().toMutableSet()
             currentUnread.add(conversationID)

@@ -130,4 +130,30 @@ class RelayConnectionTest {
         assertEquals(2, sessions.size)
         assertFalse(connection.ready)
     }
+
+    @Test fun `late ready from a failed socket cannot revive it during backoff`() {
+        connection.start()
+        receive(message("challenge"))
+        val (socket, listener) = sessions.first()
+        listener.onFailure(socket, java.io.IOException("synthetic disconnect"), null)
+
+        receive(message("ready"), index = 0)
+
+        assertFalse(connection.ready)
+        assertEquals(0, readyCount)
+        scope.advanceTimeBy(2000)
+        scope.runCurrent()
+        assertEquals(2, sessions.size)
+    }
+
+    @Test fun `late challenge from a failed socket cannot send authentication`() {
+        connection.start()
+        val (socket, listener) = sessions.first()
+        listener.onFailure(socket, java.io.IOException("synthetic disconnect"), null)
+
+        receive(message("challenge"), index = 0)
+
+        verify(socket, never()).send(any<String>())
+        assertFalse(connection.ready)
+    }
 }

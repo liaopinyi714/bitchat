@@ -9,6 +9,7 @@
 - [Android 构建、签名和安装](docs/ANDROID.md)
 - [功能范围与验收状态](docs/FEATURES.md)
 - [构建与测试结果、尚未完成的验收](docs/TESTING.md)
+- [代码检查范围、修复及维护顺序](docs/REVIEW.md)
 - [协议和加密边界](docs/PROTOCOL.md)
 - [架构与后续扩展](docs/ARCHITECTURE.md)
 - [上游来源及许可证](UPSTREAM.md)

@@ -28,6 +28,8 @@ After authentication the server sends `ready`. Socket attachments retain identit
 
 Clients reject ready-before-challenge, protocol mismatches and malformed owner / commitment keys. Authentication has a 30-second client timeout; old connection generations cannot revive a stopped or replaced socket. Failed authentication does not claim room ownership. Concurrent connection upgrades reserve capacity before asynchronous challenge-key generation.
 
+A failure invalidates the socket generation immediately, before the retry delay begins. Late challenge, ready, packet and close callbacks from that failed generation are ignored throughout backoff.
+
 ## Packets and routing
 
 `packet` frames contain `id` (SHA-256 of raw unpadded binary bytes), `packet` (base64), and optional mailbox `target`. Packets retain the upstream v1/v2 binary format. Public packets are signed. Upstream fragment wrappers are unsigned; their reassembled inner packet must pass the normal signature check.
@@ -35,6 +37,8 @@ Clients reject ready-before-challenge, protocol mismatches and malformed owner /
 Raw binary packets are limited to 65536 bytes independently of the configured JSON frame limit. JSON must still fit `MAX_FRAME_BYTES`, including base64 and routing metadata. A transport write has a bounded client queue and is not a persistent buffer.
 
 Normal room traffic must originate from the authenticated sender, and cannot have a private recipient or target. Normal mailbox traffic must originate from its owner and match its target recipient; directed identity announcements are the exception to the original announcement's recipient field.
+
+Nickname updates reuse signed ANNOUNCE packets. Known active peers without a shared ready room receive them through their mailboxes; this does not enumerate persisted contacts, discover strangers or add a global presence directory. Announcements remain metadata visible to the relay. The original text/private-message payloads do not include a separate historical sender nickname: previously stored labels are retained, while newly received history resolves labels from available announcements.
 
 For scoped recent-history synchronization, a room frame may contain `historical:true` and a `target` peer currently in that same room. Only signed ANNOUNCE and broadcast MESSAGE packets are allowed. They preserve the original sender identity and signature, so the receiver must verify them independently; socket authentication does not authenticate forwarded historical content. These frames are never sent through mailboxes or broadcast to other rooms.
 

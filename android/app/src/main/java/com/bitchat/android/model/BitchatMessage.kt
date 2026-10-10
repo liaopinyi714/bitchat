@@ -80,6 +80,17 @@ data class BitchatMessage(
     val senderNostrPubkey: String? = null
 ) : Parcelable {
 
+    /** A known sender identity takes precedence over a mutable or shared display name. */
+    fun isFromLocalPeer(localPeerID: String?, localNickname: String): Boolean {
+        val peerID = senderPeerID?.takeIf(String::isNotBlank)
+        return if (peerID != null) {
+            localPeerID != null && peerID.equals(localPeerID, ignoreCase = true)
+        } else {
+            localNickname.isNotBlank() &&
+                (sender == localNickname || sender.startsWith("$localNickname#"))
+        }
+    }
+
     /**
      * Convert message to binary payload format - exactly same as iOS version
      */

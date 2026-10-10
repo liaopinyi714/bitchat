@@ -156,6 +156,7 @@ class MeshCore(
     }
 
     fun startCore() {
+        com.bitchat.android.services.AppStateStore.setLocalPeerID(myPeerID)
         if (isActive) return
         isActive = true
         if (ownsGossipManager && enablePeriodicGossip) {

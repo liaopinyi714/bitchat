@@ -151,6 +151,8 @@ class RelayConnection(
 
     @Synchronized private fun reconnect(current: Long) {
         if (!running.get() || current != generation || retry?.isActive == true) return
+        // A failed socket loses authority immediately, including during the backoff window.
+        val retryGeneration = ++generation
         authenticationTimeout?.cancel(); authenticationTimeout = null
         socket = null
         ready = false; onStatus("disconnected")
@@ -159,7 +161,7 @@ class RelayConnection(
         retry = scope.launch {
             delay(waitMs + kotlin.random.Random.nextLong(0, 500))
             synchronized(this@RelayConnection) {
-                if (current != generation || !running.get()) return@launch
+                if (retryGeneration != generation || !running.get()) return@launch
                 retry = null
                 connect()
             }

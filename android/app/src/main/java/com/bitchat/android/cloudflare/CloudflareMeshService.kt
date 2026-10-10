@@ -21,12 +21,12 @@ import java.util.concurrent.TimeUnit
 class CloudflareMeshService(
     context: Context,
     override val myPeerID: String,
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    private val client: OkHttpClient = OkHttpClient.Builder().pingInterval(30, TimeUnit.SECONDS).build(),
+    private val crypto: EncryptionService = EncryptionService(context.applicationContext),
     private val mirrorTopic: (RoutedPacket) -> Boolean
 ) : MeshService {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val crypto = EncryptionService(context.applicationContext)
     private val dataManager = com.bitchat.android.ui.DataManager(context.applicationContext)
-    private val client = OkHttpClient.Builder().pingInterval(30, TimeUnit.SECONDS).build()
     private val rooms = ConcurrentHashMap<String, RelayConnection>()
     private val links = ConcurrentHashMap<String, String>()
     private val histories = ConcurrentHashMap<String, GossipSyncManager>()
@@ -38,9 +38,10 @@ class CloudflareMeshService(
     private lateinit var mailbox: RelayConnection
     private lateinit var sender: FragmentingPacketSender
 
-    private val transport = object : MeshTransport {
+    private val transport: MeshTransport = object : MeshTransport {
         override val id = "cloudflare"
         override fun broadcastPacket(routed: RoutedPacket): Boolean {
+            if (!running) return false
             val packet = routed.packet
             // Relay traffic from another sender never escapes its original channel or transport.
             if (TopicPayload.hex(packet.senderID) != myPeerID) return false
@@ -62,6 +63,15 @@ class CloudflareMeshService(
                 histories[name]?.onPublicPacketSeen(packet)
                 if (connection.send(packet)) accepted = true
             }
+            if (packet.type == MessageType.ANNOUNCE.value) {
+                // A private peer need not share a room. Send the same signed identity update
+                // through its mailbox, without publishing it to unrelated channels.
+                core.getPeerNicknames().keys.forEach { peer ->
+                    val sharesReadyRoom = peerTopics[peer].orEmpty().any { rooms[it]?.ready == true }
+                    if (peer != myPeerID && !sharesReadyRoom && core.getPeerInfo(peer)?.isConnected == true &&
+                        sendDirected(peer, routed)) accepted = true
+                }
+            }
             return accepted
         }
         override fun sendPacketToPeer(peerID: String, packet: BitchatPacket): Boolean = sendDirected(peerID, RoutedPacket(packet))
@@ -72,7 +82,7 @@ class CloudflareMeshService(
         override fun cancelTransfer(transferId: String): Boolean = sender.cancelTransfer(transferId)
     }
 
-    private val core = MeshCore(
+    private val core: MeshCore = MeshCore(
         context.applicationContext, scope, transport, crypto, myPeerID, 7u, null,
         object : GossipSyncManager.ConfigProvider {
             override fun seenCapacity() = 100
@@ -228,7 +238,7 @@ class CloudflareMeshService(
     )
 
     private fun sendDirected(peerID: String, routed: RoutedPacket): Boolean {
-        if (TopicPayload.hex(routed.packet.senderID) != myPeerID || !mailbox.ready) return false
+        if (!running || TopicPayload.hex(routed.packet.senderID) != myPeerID || !mailbox.ready) return false
         return sender.send(routed, "private relay") { mailbox.send(it.packet, peerID) }
     }
 
@@ -236,7 +246,7 @@ class CloudflareMeshService(
         if (running) return
         running = true; core.startCore(); mailbox.start(); rooms.values.forEach { it.start() }
         presenceJob = scope.launch {
-            while (isActive && running) { delay(60_000); if (rooms.values.any { it.ready }) core.sendBroadcastAnnounce() }
+            while (isActive && running) { delay(60_000); if (mailbox.ready || rooms.values.any { it.ready }) core.sendBroadcastAnnounce() }
         }
     }
     override fun stopServices() {

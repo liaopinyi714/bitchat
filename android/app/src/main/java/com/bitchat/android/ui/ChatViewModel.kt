@@ -51,7 +51,7 @@ private data class ConversationLiveIdentityState(
 
 /**
  * Refactored ChatViewModel - Main coordinator for bitchat functionality
- * Delegates specific responsibilities to specialized managers while maintaining 100% iOS compatibility
+ * Delegates UI responsibilities to managers; fork-specific online channels use the relay protocol.
  */
 class ChatViewModel(
     application: Application,
@@ -416,6 +416,7 @@ class ChatViewModel(
     }
 
     init {
+        com.bitchat.android.services.AppStateStore.setLocalPeerID(mesh.myPeerID)
         channelManager.onJoin = { mesh.joinTopic(it) }
         channelManager.onLeave = { mesh.leaveTopic(it) }
         channelManager.onProtect = { mesh.protectTopic(it) }

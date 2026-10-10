@@ -101,6 +101,23 @@ class IncomingMessageAdmissionTest {
     }
 
     @Test
+    fun `same nickname incoming message persists as unread`() {
+        AppStateStore.setLocalPeerID("local-peer")
+        val state = ChatState(TestScope()).apply { setNickname("shared-name") }
+        val manager = MessageManager(state, context)
+        val incoming = privateMessage(id = "same-name-durable").copy(sender = "shared-name")
+
+        assertTrue(runBlocking { manager.addPrivateMessageDurably("peer-a", incoming) })
+        assertTrue("peer-a" in state.getUnreadPrivateMessagesValue())
+        assertEquals(mapOf("peer-a" to 1), AppStateStore.unreadPrivateMessageCounts.value)
+
+        val snapshot = requireNotNull(runBlocking { repository.loadConversationAndWait("peer-a") })
+        assertEquals(mapOf("peer-a" to 1), snapshot.unreadCounts)
+        assertFalse(incoming.id in snapshot.readMessageIDs)
+        assertEquals("shared-name", snapshot.displayNames["peer-a"])
+    }
+
+    @Test
     fun `delivery receipt persists after older message is unloaded from memory`() {
         val older = privateMessage(id = "older-outgoing").copy(
             sender = "me",
