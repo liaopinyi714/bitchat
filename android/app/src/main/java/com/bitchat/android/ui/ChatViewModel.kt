@@ -421,8 +421,11 @@ class ChatViewModel(
         channelManager.onProtect = { mesh.protectTopic(it) }
         viewModelScope.launch {
             com.bitchat.android.cloudflare.TopicRelayState.status.collect { states ->
-                states.filterValues { it == "password_required" }.keys.forEach(channelManager::prompt)
+                state.getCurrentChannelValue()?.takeIf { states[it] == "password_required" }?.let(channelManager::prompt)
             }
+        }
+        viewModelScope.launch {
+            com.bitchat.android.cloudflare.TopicRelayState.protectionConfirmed.collect(channelManager::onProtectionConfirmed)
         }
         observeConversationPresenceWithDisconnectGrace()
         // Note: Mesh service delegate is now set by MainActivity

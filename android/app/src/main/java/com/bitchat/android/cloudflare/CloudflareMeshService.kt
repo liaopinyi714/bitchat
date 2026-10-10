@@ -164,7 +164,10 @@ class CloudflareMeshService(
         val name = TopicPayload.normalize(channel)
         TopicPayload.joinedTopics.add(name)
         histories.computeIfAbsent(name, ::history)
-        rooms.remove(name)?.stop()
+        rooms[name]?.let { existing ->
+            if (running) existing.start()
+            return
+        }
         val connection = connection("room", TopicPayload.roomId(name), name)
         rooms[name] = connection
         if (running) connection.start()
@@ -175,7 +178,8 @@ class CloudflareMeshService(
         peerTopics.keys.toList().forEach { removePeerFromTopic(it, channel) }
         TopicRelayState.remove(channel); TopicPayload.joinedTopics.remove(channel)
     }
-    fun protect(channel: String): Boolean = TopicPayload.expectedCommitment(channel)?.let { rooms[channel]?.protect(it) } == true
+    fun protect(channel: String): Boolean = (TopicPayload.pendingCommitment(channel) ?: TopicPayload.expectedCommitment(channel))
+        ?.let { rooms[channel]?.protect(it) } == true
     fun isOnline(peerID: String): Boolean = running && mailbox.ready && core.getPeerInfo(peerID)?.isConnected == true
 
     private fun connection(kind: String, id: String, channel: String?): RelayConnection = RelayConnection(
@@ -193,18 +197,34 @@ class CloudflareMeshService(
         onReady = {
             core.sendBroadcastAnnounce()
             if (channel != null) histories[channel]?.scheduleInitialSync(1000)
-            if (channel != null && TopicRelayState.owners[channel] == TopicPayload.hex(requireNotNull(crypto.getStaticPublicKey())) && TopicPayload.hasKey(channel)) protect(channel)
+            if (channel != null && TopicRelayState.owners[channel] == TopicPayload.hex(requireNotNull(crypto.getStaticPublicKey())) &&
+                (TopicPayload.hasKey(channel) || TopicPayload.pendingCommitment(channel) != null)) protect(channel)
         },
         onStatus = { status -> if (channel != null) {
             TopicRelayState.setStatus(channel, status)
-            if (status == "disconnected") peerTopics.keys.toList().forEach { removePeerFromTopic(it, channel) }
+            if (status == "disconnected" || status == "password_required") peerTopics.keys.toList().forEach { removePeerFromTopic(it, channel) }
         } },
         onProtection = if (channel == null) null else { owner, commitment ->
             if (owner != null) TopicRelayState.owners[channel] = owner
-            if (commitment != null) TopicPayload.requireCommitment(channel, commitment)
-            commitment == null || TopicPayload.hasKey(channel)
+            if (commitment != null) {
+                if (TopicPayload.expectedCommitment(channel) != commitment) histories[channel]?.clear()
+                if (TopicPayload.confirmProtection(channel, commitment)) TopicRelayState.confirmProtection(channel)
+                TopicPayload.requireCommitment(channel, commitment)
+            }
+            when {
+                commitment != null && !TopicPayload.hasKey(channel) -> "password_required"
+                commitment == null && owner != null && owner != TopicPayload.hex(requireNotNull(crypto.getStaticPublicKey())) && TopicPayload.hasKey(channel) -> "public_room_password"
+                else -> null
+            }
         },
-        onPeerLeft = { peer -> if (channel != null) removePeerFromTopic(peer, channel) }
+        onPeerLeft = { peer -> if (channel != null) removePeerFromTopic(peer, channel) },
+        onProtected = { commitment -> if (channel != null) {
+            if (TopicPayload.confirmProtection(channel, commitment)) {
+                histories[channel]?.clear()
+                TopicRelayState.confirmProtection(channel)
+                core.sendBroadcastAnnounce()
+            } else require(TopicPayload.expectedCommitment(channel) == commitment)
+        } }
     )
 
     private fun sendDirected(peerID: String, routed: RoutedPacket): Boolean {
@@ -221,7 +241,9 @@ class CloudflareMeshService(
     }
     override fun stopServices() {
         running = false; presenceJob?.cancel(); presenceJob = null
-        mailbox.stop(); rooms.values.forEach { it.stop() }; core.stopCore(); core.clearAllInternalData(); links.clear()
+        mailbox.stop()
+        rooms.forEach { (channel, connection) -> connection.stop(); TopicRelayState.setStatus(channel, "disconnected") }
+        core.stopCore(); core.clearAllInternalData(); links.clear(); peerTopics.clear()
         com.bitchat.android.services.AppStateStore.clearTransportPeers(transport.id)
         com.bitchat.android.services.AppStateStore.clearTransportDirectPeers(transport.id)
     }

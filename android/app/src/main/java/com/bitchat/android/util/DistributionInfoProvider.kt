@@ -5,6 +5,8 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import com.bitchat.android.BuildConfig
+import com.bitchat.android.R
+import androidx.core.content.ContextCompat
 import java.io.File
 import java.security.MessageDigest
 import java.util.zip.ZipFile
@@ -22,7 +24,8 @@ object DistributionInfoProvider {
         "x86"
     )
 
-    fun inspect(context: Context): DistributionInfo {
+    fun inspect(sourceContext: Context): DistributionInfo {
+        val context = ContextCompat.getContextForLanguage(sourceContext)
         val packageInfo = context.packageManager.getPackageInfo(
             context.packageName,
             signingFlags()
@@ -38,14 +41,14 @@ object DistributionInfoProvider {
         }
 
         return DistributionInfo(
-            installSource = installSourceLabel(installerPackage),
+            installSource = installSourceLabel(context, installerPackage),
             installerPackage = installerPackage,
-            packageFormat = if (splitApks.isEmpty()) "Standalone APK" else "Split APK set",
-            architecture = architectureLabel(applicationInfo.sourceDir, splitApks),
+            packageFormat = if (splitApks.isEmpty()) context.getString(R.string.debug_ui_standalone) else context.getString(R.string.debug_ui_split),
+            architecture = architectureLabel(context, applicationInfo.sourceDir, splitApks),
             sharingSource = when (installedApkVariant) {
-                ShareableApkVariant.UNIVERSAL -> "Current installed APK"
-                ShareableApkVariant.ARM64 -> "Current installed APK (ARM64)"
-                null -> "Verified GitHub universal APK"
+                ShareableApkVariant.UNIVERSAL -> context.getString(R.string.debug_ui_installed_apk)
+                ShareableApkVariant.ARM64 -> context.getString(R.string.debug_ui_installed_arm64)
+                null -> context.getString(R.string.debug_ui_github_apk)
             },
             versionName = packageInfo.versionName ?: BuildConfig.VERSION_NAME,
             versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -54,7 +57,7 @@ object DistributionInfoProvider {
                 @Suppress("DEPRECATION")
                 packageInfo.versionCode.toLong()
             },
-            signingChannel = signingChannel(installerPackage, certificateSha256),
+            signingChannel = signingChannel(context, installerPackage, certificateSha256),
             certificateSha256 = certificateSha256
         )
     }
@@ -74,20 +77,20 @@ object DistributionInfoProvider {
         }
     }
 
-    private fun installSourceLabel(installerPackage: String?): String {
+    private fun installSourceLabel(context: Context, installerPackage: String?): String {
         return when (installerPackage) {
             "com.android.vending" -> "Google Play"
             "com.amazon.venezia" -> "Amazon Appstore"
             "org.fdroid.fdroid" -> "F-Droid"
             "com.android.packageinstaller",
             "com.google.android.packageinstaller",
-            "com.android.permissioncontroller" -> "Android package installer"
-            null -> if (BuildConfig.DEBUG) "ADB / local install" else "Unknown / local install"
+            "com.android.permissioncontroller" -> context.getString(R.string.debug_ui_package_installer)
+            null -> if (BuildConfig.DEBUG) context.getString(R.string.debug_ui_adb_install) else context.getString(R.string.debug_ui_unknown_install)
             else -> installerPackage
         }
     }
 
-    private fun architectureLabel(baseApkPath: String, splitApkPaths: Array<out String>): String {
+    private fun architectureLabel(context: Context, baseApkPath: String, splitApkPaths: Array<out String>): String {
         val apkPaths = listOf(baseApkPath) + splitApkPaths
         val packagedAbis = buildSet {
             apkPaths.forEach { path ->
@@ -98,11 +101,11 @@ object DistributionInfoProvider {
 
         return when {
             packagedAbis.containsAll(UNIVERSAL_RELEASE_ABIS) ->
-                "Universal (${packagedAbis.joinToString()})"
-            packagedAbis.size > 1 -> "Multi-ABI (${packagedAbis.joinToString()})"
+                context.getString(R.string.debug_ui_universal, packagedAbis.joinToString())
+            packagedAbis.size > 1 -> context.getString(R.string.debug_ui_multi_abi, packagedAbis.joinToString())
             packagedAbis.size == 1 -> packagedAbis.single()
-            splitApkPaths.isNotEmpty() -> "Device ABI (${Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown"})"
-            else -> "Universal (no native ABI payload)"
+            splitApkPaths.isNotEmpty() -> context.getString(R.string.debug_ui_device_abi, Build.SUPPORTED_ABIS.firstOrNull() ?: context.getString(R.string.debug_ui_unknown))
+            else -> context.getString(R.string.debug_ui_no_native)
         }
     }
 
@@ -158,8 +161,8 @@ object DistributionInfoProvider {
             .toSet()
     }
 
-    private fun signingChannel(installerPackage: String?, certificateSha256: String?): String {
-        if (BuildConfig.DEBUG) return "Debug"
+    private fun signingChannel(context: Context, installerPackage: String?, certificateSha256: String?): String {
+        if (BuildConfig.DEBUG) return context.getString(R.string.debug_ui_debug_signing)
         if (installerPackage == "com.android.vending") return "Google Play"
 
         val pinnedGitHubCert = BuildConfig.GITHUB_RELEASE_CERT_SHA256
@@ -167,9 +170,9 @@ object DistributionInfoProvider {
             .lowercase()
             .takeIf { it.matches(Regex("[a-f0-9]{64}")) }
         return if (certificateSha256 != null && certificateSha256 == pinnedGitHubCert) {
-            "GitHub release"
+            context.getString(R.string.debug_ui_github_release)
         } else {
-            "Release / unknown channel"
+            context.getString(R.string.debug_ui_unknown_release)
         }
     }
 

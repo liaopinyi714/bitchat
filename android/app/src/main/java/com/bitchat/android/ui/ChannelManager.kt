@@ -5,22 +5,27 @@ import com.bitchat.android.cloudflare.TopicPayload
 import com.bitchat.android.cloudflare.TopicRelayState
 import com.bitchat.android.model.BitchatMessage
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.security.MessageDigest
+import javax.crypto.spec.SecretKeySpec
 
 /** Topic membership is local; the relay records the authenticated creator. */
 class ChannelManager(
     private val state: ChatState,
     private val messageManager: MessageManager,
     private val dataManager: DataManager,
-    private val coroutineScope: CoroutineScope
+    private val coroutineScope: CoroutineScope,
+    private val deriveKey: suspend (String, String) -> SecretKeySpec = { password, channel ->
+        withContext(Dispatchers.Default) { TopicPayload.derive(password, channel) }
+    }
 ) {
     var onJoin: (String) -> Unit = {}
     var onLeave: (String) -> Unit = {}
     var onProtect: (String) -> Boolean = { false }
-    private val pending = mutableSetOf<String>()
+    private val pending = mutableMapOf<String, Any>()
     private var epoch = 0L
 
     fun joinChannel(channel: String, password: String? = null, myPeerID: String): Boolean {
@@ -28,12 +33,13 @@ class ChannelManager(
             messageManager.addSystemMessage(messageManager.getString(R.string.topic_invalid_name)); return false
         }
         if (password != null) {
-            if (!pending.add(name)) return false
+            if (pending.containsKey(name)) return false
+            val token = Any().also { pending[name] = it }
             val expectedEpoch = epoch
             coroutineScope.launch {
                 try {
-                    val key = withContext(Dispatchers.Default) { TopicPayload.derive(password, name) }
-                    if (expectedEpoch != epoch) return@launch
+                    val key = deriveKey(password, name)
+                    if (expectedEpoch != epoch || pending[name] !== token) return@launch
                     if (!TopicPayload.setKey(name, key)) {
                         messageManager.addSystemMessage(messageManager.getString(R.string.topic_incorrect_password))
                         prompt(name)
@@ -42,8 +48,13 @@ class ChannelManager(
                         hidePasswordPrompt()
                         joinChannel(name, null, myPeerID)
                     }
-                } catch (_: Exception) { messageManager.addSystemMessage(messageManager.getString(R.string.topic_unlock_failed)); prompt(name) }
-                finally { pending.remove(name) }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) {
+                    if (expectedEpoch == epoch && pending[name] === token) {
+                        messageManager.addSystemMessage(messageManager.getString(R.string.topic_unlock_failed)); prompt(name)
+                    }
+                }
+                finally { if (pending[name] === token) pending.remove(name) }
             }
             return true
         }
@@ -70,14 +81,16 @@ class ChannelManager(
     }
 
     fun leaveChannel(channel: String) {
-        epoch++
+        pending.remove(channel)
         onLeave(channel)
         state.setJoinedChannels(state.getJoinedChannelsValue() - channel)
+        state.setPasswordProtectedChannels(state.getPasswordProtectedChannelsValue() - channel)
         if (state.getCurrentChannelValue() == channel) switchToChannel(null)
         messageManager.removeChannelMessages(channel)
         dataManager.removeChannelMembers(channel)
         TopicPayload.forget(channel)
         dataManager.removeChannelCreator(channel)
+        if (state.getPasswordPromptChannelValue() == channel) hidePasswordPrompt()
         saveChannelData()
     }
 
@@ -111,19 +124,34 @@ class ChannelManager(
     fun hidePasswordPrompt() { state.setShowPasswordPrompt(false); state.setPasswordPromptChannel(null) }
 
     fun setChannelPassword(channel: String, password: String) {
-        if (!pending.add(channel)) return
+        if (pending.containsKey(channel) || TopicPayload.pendingCommitment(channel) != null) return
+        val token = Any().also { pending[channel] = it }
         val expectedEpoch = epoch
         coroutineScope.launch {
             try {
-                val key = withContext(Dispatchers.Default) { TopicPayload.derive(password, channel) }
-                if (expectedEpoch != epoch) return@launch
-                TopicPayload.replaceKey(channel, key)
-                state.setPasswordProtectedChannels(state.getPasswordProtectedChannelsValue() + channel)
-                saveChannelData()
-                if (!onProtect(channel)) onJoin(channel)
-            } catch (_: Exception) { messageManager.addSystemMessage(messageManager.getString(R.string.topic_protect_failed)) }
-            finally { pending.remove(channel) }
+                val key = deriveKey(password, channel)
+                if (expectedEpoch != epoch || pending[channel] !== token) return@launch
+                TopicPayload.stageProtection(channel, key)
+                if (!onProtect(channel)) {
+                    TopicPayload.discardPendingProtection(channel)
+                    messageManager.addSystemMessage(messageManager.getString(R.string.topic_protect_requires_online))
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                if (expectedEpoch == epoch && pending[channel] === token) {
+                    TopicPayload.discardPendingProtection(channel)
+                    messageManager.addSystemMessage(messageManager.getString(R.string.topic_protect_failed))
+                }
+            }
+            finally { if (pending[channel] === token) pending.remove(channel) }
         }
+    }
+
+    fun onProtectionConfirmed(channel: String) {
+        if (!state.getJoinedChannelsValue().contains(channel)) return
+        state.setPasswordProtectedChannels(state.getPasswordProtectedChannelsValue() + channel)
+        saveChannelData()
+        messageManager.addSystemMessage(messageManager.getString(R.string.command_password_changed, channel))
     }
 
     fun clearAllChannels() {

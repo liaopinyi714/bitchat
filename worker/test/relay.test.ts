@@ -107,6 +107,57 @@ describe("relay authentication and isolation", () => {
     } finally { inbox.close(); }
   });
 
+  it("rejects expired authentication without claiming the room", async () => {
+    const id = "7".repeat(64);
+    const a = await identity();
+    const { inbox, challenge } = await connect("room", id);
+    const stub = bindings.ROOMS.get(bindings.ROOMS.idFromName(id));
+    try {
+      await runInDurableObject(stub, async (_instance, state) => {
+        for (const socket of state.getWebSockets()) {
+          const attachment = socket.deserializeAttachment() as Record<string, unknown>;
+          attachment.openedAt = Date.now() - 31000;
+          socket.serializeAttachment(attachment);
+        }
+      });
+      inbox.socket.send(JSON.stringify(await authentication(a, challenge)));
+      expect((await inbox.next()).code).toBe("authentication_required");
+      expect(await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM room_config").one().n)).toBe(0);
+    } finally { inbox.close(); }
+  });
+
+  it("reserves connection capacity while asynchronous keys are generated", async () => {
+    const id = "8".repeat(64);
+    const stub = bindings.ROOMS.get(bindings.ROOMS.idFromName(id));
+    const statuses = await runInDurableObject(stub, async (instance) => {
+      const relay = instance as unknown as { env: Env; fetch(request: Request): Promise<Response> };
+      const saved = relay.env.MAX_CONNECTIONS;
+      relay.env.MAX_CONNECTIONS = "1";
+      try {
+        const request = () => new Request(`https://relay.test/v1/ws/room/${id}`, { headers: { Upgrade: "websocket" } });
+        const responses = await Promise.all([relay.fetch(request()), relay.fetch(request())]);
+        for (const response of responses) {
+          response.webSocket?.accept();
+          response.webSocket?.close(1000);
+        }
+        return responses.map((response) => response.status);
+      } finally { relay.env.MAX_CONNECTIONS = saved; }
+    });
+    expect(statuses.sort()).toEqual([101, 429]);
+  });
+
+  it("keeps binary packets within Android's receive limit", async () => {
+    const a = await identity();
+    const { inbox } = await connect("room", "9".repeat(64), a);
+    try {
+      const oversized = new Uint8Array(65537);
+      const frame = { type: "packet", id: await sha256(oversized), packet: btoa(Array.from(oversized, (b) => String.fromCharCode(b)).join("")) };
+      inbox.socket.send(JSON.stringify(frame));
+      expect((await inbox.next()).code).toBe("packet_size");
+    } finally { inbox.close(); }
+  });
+
   it("forwards a room packet and restores authentication after hibernation", async () => {
     const a = await identity(); const b = await identity();
     const x = await connect("room", room, a); const y = await connect("room", room, b);

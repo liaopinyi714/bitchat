@@ -4,6 +4,7 @@
 
 ## 使用和部署
 
+- [安装、频道、密码、私聊和更新说明](docs/USAGE.md)
 - [Cloudflare 从 GitHub 导入、部署和绑定域名](docs/DEPLOYMENT.md)
 - [Android 构建、签名和安装](docs/ANDROID.md)
 - [功能范围与验收状态](docs/FEATURES.md)
@@ -11,10 +12,15 @@
 - [协议和加密边界](docs/PROTOCOL.md)
 - [架构与后续扩展](docs/ARCHITECTURE.md)
 - [上游来源及许可证](UPSTREAM.md)
+- [安全边界与问题报告](SECURITY.md)
+- [开发与贡献](CONTRIBUTING.md)
+- [版本记录](CHANGELOG.md)
 
 默认在线端点：`wss://chat.123456714.xyz`。Cloudflare 由仓库所有者部署；在部署完成前，在线频道不可用，本地蓝牙功能仍可使用。
 
 在频道入口输入名称即可创建或加入，也支持 `/join #channel`。没有地图、地理频道或全站频道目录。知道名称的人可加入公开频道；密码频道的消息由客户端加密。首次在服务器认证成功的身份成为频道创建者，可用 `/pass <password>` 设置密码。密码不持久保存，重启后需重新输入。
+
+修改密码需要连接中继，客户端收到服务器确认后才切换密钥并提示成功。只有相同名称、相同中继上的频道才属于同一个在线聊天室。
 
 ## 项目结构
 
@@ -23,6 +29,9 @@ android/             Android 手机端和上游 Wear 模块
 worker/              Workers + SQLite Durable Objects 中继
 docs/                本分支的部署、协议、架构和验收文档
 .github/workflows/   Android 与中继的持续集成
+CONTRIBUTING.md      开发、验证与提交约束
+SECURITY.md          安全边界和问题报告
+CHANGELOG.md         分支版本变化
 UPSTREAM.md          来源、版本和修改范围
 LICENSE.md           GPL-3.0
 ```

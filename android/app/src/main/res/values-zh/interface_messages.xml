@@ -28,6 +28,8 @@
     <string name="topic_incorrect_password">频道密码错误</string>
     <string name="topic_unlock_failed">无法解锁频道</string>
     <string name="topic_protect_failed">无法设置频道加密</string>
+    <string name="topic_protect_requires_online">连接在线中继后才能修改频道密码</string>
+    <string name="topic_public_password_error">这是公开频道，请退出后不填密码重新加入</string>
     <string name="command_hint_block">屏蔽用户或查看已屏蔽用户</string>
     <string name="command_hint_channels">查看已加入的频道</string>
     <string name="command_hint_clear">清除聊天消息</string>

@@ -28,6 +28,8 @@
     <string name="topic_incorrect_password">Incorrect channel password</string>
     <string name="topic_unlock_failed">Unable to unlock channel</string>
     <string name="topic_protect_failed">Unable to protect channel</string>
+    <string name="topic_protect_requires_online">Connect to the relay before changing the channel password</string>
+    <string name="topic_public_password_error">Public channel: leave and rejoin without a password</string>
     <string name="command_hint_block">Block a user or list blocked users</string>
     <string name="command_hint_channels">Show joined channels</string>
     <string name="command_hint_clear">Clear chat messages</string>

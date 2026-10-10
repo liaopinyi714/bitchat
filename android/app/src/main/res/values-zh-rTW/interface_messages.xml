@@ -28,6 +28,8 @@
     <string name="topic_incorrect_password">頻道密碼錯誤</string>
     <string name="topic_unlock_failed">無法解鎖頻道</string>
     <string name="topic_protect_failed">無法設置頻道加密</string>
+    <string name="topic_protect_requires_online">連線至線上中繼後才能修改頻道密碼</string>
+    <string name="topic_public_password_error">這是公開頻道，請退出後不填密碼重新加入</string>
     <string name="command_hint_block">屏蔽用戶或查看已屏蔽用戶</string>
     <string name="command_hint_channels">查看已加入的頻道</string>
     <string name="command_hint_clear">清除聊天消息</string>

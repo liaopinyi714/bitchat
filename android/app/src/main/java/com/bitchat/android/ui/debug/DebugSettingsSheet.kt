@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.res.stringResource
 import com.bitchat.android.R
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -67,13 +68,13 @@ fun MeshTopologySection(
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Filled.SettingsEthernet, contentDescription = null, tint = Color(0xFF8E8E93))
-                Text("Mesh topology", fontFamily = BitchatFontFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text(stringResource(R.string.debug_ui_mesh_topology), fontFamily = BitchatFontFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
             }
             val nodes = snapshot.nodes
             val edges = snapshot.edges
             val empty = nodes.isEmpty()
             if (empty) {
-                Text("No gossip yet", fontFamily = BitchatFontFamily, fontSize = 11.sp, color = colorScheme.onSurface.copy(alpha = 0.6f))
+                Text(stringResource(R.string.debug_ui_no_gossip), fontFamily = BitchatFontFamily, fontSize = 11.sp, color = colorScheme.onSurface.copy(alpha = 0.6f))
             } else {
                 ForceDirectedMeshGraph(
                     nodes = nodes,
@@ -94,7 +95,7 @@ fun MeshTopologySection(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     nodes.forEach { node ->
-                        val label = "${node.peerID.take(8)} • ${node.nickname ?: "Unknown"}"
+                        val label = "${node.peerID.take(8)} • ${node.nickname ?: stringResource(R.string.debug_ui_unknown)}"
                         Text(
                             text = label,
                             fontFamily = BitchatFontFamily,
@@ -111,6 +112,7 @@ fun MeshTopologySection(
 @Composable
 private fun DistributionInfoSection(info: DistributionInfoProvider.DistributionInfo?) {
     val context = LocalContext.current
+    val certificateCopied = stringResource(R.string.debug_ui_cert_copied)
     val colorScheme = MaterialTheme.colorScheme
 
     Surface(
@@ -127,7 +129,7 @@ private fun DistributionInfoSection(info: DistributionInfoProvider.DistributionI
             ) {
                 Icon(Icons.Filled.Devices, contentDescription = null, tint = Color(0xFF5856D6))
                 Text(
-                    "Distribution info",
+                    stringResource(R.string.debug_ui_distribution),
                     fontFamily = BitchatFontFamily,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
@@ -136,24 +138,24 @@ private fun DistributionInfoSection(info: DistributionInfoProvider.DistributionI
 
             if (info == null) {
                 Text(
-                    "Inspecting installed package…",
+                    stringResource(R.string.debug_ui_inspecting),
                     fontFamily = BitchatFontFamily,
                     fontSize = 11.sp,
                     color = colorScheme.onSurface.copy(alpha = 0.6f)
                 )
             } else {
-                DistributionInfoRow("Install source", info.installSource)
+                DistributionInfoRow(stringResource(R.string.debug_ui_install_source), info.installSource)
                 info.installerPackage?.let {
-                    DistributionInfoRow("Installer package", it)
+                    DistributionInfoRow(stringResource(R.string.debug_ui_installer_package), it)
                 }
-                DistributionInfoRow("Package format", info.packageFormat)
-                DistributionInfoRow("APK architecture", info.architecture)
-                DistributionInfoRow("Sharing source", info.sharingSource)
-                DistributionInfoRow("Version", "${info.versionName} (${info.versionCode})")
-                DistributionInfoRow("Signing channel", info.signingChannel)
+                DistributionInfoRow(stringResource(R.string.debug_ui_package_format), info.packageFormat)
+                DistributionInfoRow(stringResource(R.string.debug_ui_architecture), info.architecture)
+                DistributionInfoRow(stringResource(R.string.debug_ui_sharing_source), info.sharingSource)
+                DistributionInfoRow(stringResource(R.string.debug_ui_version), "${info.versionName} (${info.versionCode})")
+                DistributionInfoRow(stringResource(R.string.debug_ui_signing_channel), info.signingChannel)
                 DistributionInfoRow(
-                    label = "Certificate SHA-256",
-                    value = info.certificateSha256 ?: "Unavailable"
+                    label = stringResource(R.string.debug_ui_certificate),
+                    value = info.certificateSha256 ?: stringResource(R.string.debug_ui_unavailable)
                 )
 
                 if (info.certificateSha256 != null) {
@@ -166,11 +168,11 @@ private fun DistributionInfoSection(info: DistributionInfoProvider.DistributionI
                                     info.certificateSha256
                                 )
                             )
-                            Toast.makeText(context, "Certificate fingerprint copied", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, certificateCopied, Toast.LENGTH_SHORT).show()
                         },
                         contentPadding = PaddingValues(horizontal = 0.dp)
                     ) {
-                        Text("Copy certificate fingerprint", fontFamily = BitchatFontFamily)
+                        Text(stringResource(R.string.debug_ui_copy_cert), fontFamily = BitchatFontFamily)
                     }
                 }
             }
@@ -224,6 +226,8 @@ fun DebugSettingsSheet(
     val gcsMaxBytes by manager.gcsMaxBytes.collectAsState()
     val gcsFpr by manager.gcsFprPercent.collectAsState()
     val context = LocalContext.current
+    val localeTags = LocalConfiguration.current.locales.toLanguageTags()
+    val packetCountsShortFormat = stringResource(R.string.debug_ui_packet_counts_short)
     var distributionInfo by remember {
         mutableStateOf<DistributionInfoProvider.DistributionInfo?>(null)
     }
@@ -315,7 +319,7 @@ fun DebugSettingsSheet(
         }
     }
 
-    LaunchedEffect(isPresented) {
+    LaunchedEffect(isPresented, localeTags) {
         if (isPresented) {
             distributionInfo = withContext(Dispatchers.IO) {
                 runCatching { DistributionInfoProvider.inspect(context) }.getOrNull()
@@ -461,7 +465,7 @@ fun DebugSettingsSheet(
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(Icons.Filled.Devices, contentDescription = null, tint = Color(0xFF4CAF50))
-                            Text("Transports", fontFamily = BitchatFontFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text(stringResource(R.string.debug_ui_transports), fontFamily = BitchatFontFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Filled.Bluetooth, contentDescription = null, tint = Color(0xFF007AFF))
@@ -497,7 +501,7 @@ fun DebugSettingsSheet(
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Spacer(Modifier.width(24.dp))
-                            Text("Wi‑Fi Aware verbose logging", fontFamily = BitchatFontFamily, modifier = Modifier.weight(1f))
+                            Text(stringResource(R.string.debug_ui_aware_logging), fontFamily = BitchatFontFamily, modifier = Modifier.weight(1f))
                             Switch(checked = wifiAwareVerbose, onCheckedChange = { manager.setWifiAwareVerbose(it) })
                         }
                     }
@@ -548,18 +552,18 @@ fun DebugSettingsSheet(
                                 FilterChip(
                                     selected = graphMode == GraphMode.OVERALL,
                                     onClick = { graphMode = GraphMode.OVERALL },
-                                    label = { Text("Overall") }
+                                    label = { Text(stringResource(R.string.debug_ui_overall)) }
                                 )
                                 FilterChip(
                                     selected = graphMode == GraphMode.PER_DEVICE,
                                     onClick = { graphMode = GraphMode.PER_DEVICE },
-                                    label = { Text("Per Device") },
+                                    label = { Text(stringResource(R.string.debug_ui_per_device)) },
                                     leadingIcon = { Icon(Icons.Filled.Devices, contentDescription = null) }
                                 )
                                 FilterChip(
                                     selected = graphMode == GraphMode.PER_PEER,
                                     onClick = { graphMode = GraphMode.PER_PEER },
-                                    label = { Text("Per Peer") },
+                                    label = { Text(stringResource(R.string.debug_ui_per_peer)) },
                                     leadingIcon = { Icon(Icons.Filled.SettingsEthernet, contentDescription = null) }
                                 )
                             }
@@ -648,13 +652,13 @@ fun DebugSettingsSheet(
                             // Helper functions moved to top-level composable below to avoid scope issues
 
                             // Render two blocks: Incoming and Outgoing
-                            Text("Incoming", fontFamily = BitchatFontFamily, fontSize = 11.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
+                            Text(stringResource(R.string.debug_ui_incoming), fontFamily = BitchatFontFamily, fontSize = 11.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
                             Text(
-                                "${relayStats.lastSecondIncoming}/s • ${relayStats.lastMinuteIncoming}/m • ${relayStats.last15MinuteIncoming}/15m • total ${relayStats.totalIncomingCount}",
+                                stringResource(R.string.debug_ui_packet_counts, relayStats.lastSecondIncoming, relayStats.lastMinuteIncoming, relayStats.last15MinuteIncoming, relayStats.totalIncomingCount),
                                 fontFamily = BitchatFontFamily, fontSize = 10.sp, color = colorScheme.onSurface.copy(alpha = 0.6f)
                             )
                             DrawGraphBlock(
-                                title = "Incoming",
+                                title = stringResource(R.string.debug_ui_incoming),
                                 stackedKeys = stackedKeysIncoming,
                                 stackedSeries = stackedSeriesIncoming,
                                 overallSeries = if (graphMode == GraphMode.OVERALL) overallSeriesIncoming else null,
@@ -689,13 +693,13 @@ fun DebugSettingsSheet(
                                             val s = perPeerIncoming[key] ?: 0
                                             val m = perPeerIncoming1m[key] ?: 0
                                             val t = (perPeerIncomingTotal[key] ?: 0L)
-                                            "${s}/s • ${m}/m • total ${t}"
+                                            packetCountsShortFormat.format(s, m, t)
                                         }
                                         GraphMode.PER_DEVICE -> {
                                             val s = perDeviceIncoming[key] ?: 0
                                             val m = perDeviceIncoming1m[key] ?: 0
                                             val t = (perDeviceIncomingTotal[key] ?: 0L)
-                                            "${s}/s • ${m}/m • total ${t}"
+                                            packetCountsShortFormat.format(s, m, t)
                                         }
                                         else -> ""
                                     }
@@ -704,13 +708,13 @@ fun DebugSettingsSheet(
                             if (graphMode != GraphMode.OVERALL && stackedKeysIncoming.isNotEmpty()) { /* legend printed inside DrawGraphBlock */ }
 
                             Spacer(Modifier.height(8.dp))
-                            Text("Outgoing", fontFamily = BitchatFontFamily, fontSize = 11.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
+                            Text(stringResource(R.string.debug_ui_outgoing), fontFamily = BitchatFontFamily, fontSize = 11.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
                             Text(
-                                "${relayStats.lastSecondOutgoing}/s • ${relayStats.lastMinuteOutgoing}/m • ${relayStats.last15MinuteOutgoing}/15m • total ${relayStats.totalOutgoingCount}",
+                                stringResource(R.string.debug_ui_packet_counts, relayStats.lastSecondOutgoing, relayStats.lastMinuteOutgoing, relayStats.last15MinuteOutgoing, relayStats.totalOutgoingCount),
                                 fontFamily = BitchatFontFamily, fontSize = 10.sp, color = colorScheme.onSurface.copy(alpha = 0.6f)
                             )
                             DrawGraphBlock(
-                                title = "Outgoing",
+                                title = stringResource(R.string.debug_ui_outgoing),
                                 stackedKeys = stackedKeysOutgoing,
                                 stackedSeries = stackedSeriesOutgoing,
                                 overallSeries = if (graphMode == GraphMode.OVERALL) overallSeriesOutgoing else null,
@@ -745,13 +749,13 @@ fun DebugSettingsSheet(
                                             val s = perPeerOutgoing[key] ?: 0
                                             val m = perPeerOutgoing1m[key] ?: 0
                                             val t = (perPeerOutgoingTotal[key] ?: 0L)
-                                            "${s}/s • ${m}/m • total ${t}"
+                                            packetCountsShortFormat.format(s, m, t)
                                         }
                                         GraphMode.PER_DEVICE -> {
                                             val s = perDeviceOutgoing[key] ?: 0
                                             val m = perDeviceOutgoing1m[key] ?: 0
                                             val t = (perDeviceOutgoingTotal[key] ?: 0L)
-                                            "${s}/s • ${m}/m • total ${t}"
+                                            packetCountsShortFormat.format(s, m, t)
                                         }
                                         else -> ""
                                     }
@@ -792,27 +796,27 @@ fun DebugSettingsSheet(
                             AssistChip(
                                 onClick = enableWifiAware,
                                 enabled = wifiAwareSupported,
-                                label = { Text("Start") }
+                                label = { Text(stringResource(R.string.debug_ui_start)) }
                             )
-                            AssistChip(onClick = { manager.setWifiAwareEnabled(false) }, label = { Text("Stop") })
+                            AssistChip(onClick = { manager.setWifiAwareEnabled(false) }, label = { Text(stringResource(R.string.debug_ui_stop)) })
                             AssistChip(
                                 onClick = { com.bitchat.android.wifiaware.WifiAwareController.getService()?.sendBroadcastAnnounce() },
                                 enabled = running,
-                                label = { Text("Announce") }
+                                label = { Text(stringResource(R.string.debug_ui_announce)) }
                             )
                         }
-                        Text("Discovered: ${wifiAwareDiscovered.size}", fontFamily = BitchatFontFamily, fontSize = 12.sp)
+                        Text(stringResource(R.string.debug_ui_discovered_count, wifiAwareDiscovered.size), fontFamily = BitchatFontFamily, fontSize = 12.sp)
                         if (wifiAwareDiscovered.isEmpty()) {
-                            Text("No discoveries yet", fontFamily = BitchatFontFamily, fontSize = 11.sp, color = colorScheme.onSurface.copy(alpha = 0.6f))
+                            Text(stringResource(R.string.debug_ui_no_discoveries), fontFamily = BitchatFontFamily, fontSize = 11.sp, color = colorScheme.onSurface.copy(alpha = 0.6f))
                         } else {
                             wifiAwareDiscovered.entries.take(50).forEach { (peer, nick) ->
                                 Text("• ${if (nick.isBlank()) peer.take(8) + "…" else nick} (${peer.take(8)}…) ", fontFamily = BitchatFontFamily, fontSize = 12.sp)
                             }
                         }
                         Divider()
-                        Text("Connected: ${wifiAwareConnected.size}", fontFamily = BitchatFontFamily, fontSize = 12.sp)
+                        Text(stringResource(R.string.debug_ui_connected_count, wifiAwareConnected.size), fontFamily = BitchatFontFamily, fontSize = 12.sp)
                         if (wifiAwareConnected.isEmpty()) {
-                            Text("No active sockets", fontFamily = BitchatFontFamily, fontSize = 11.sp, color = colorScheme.onSurface.copy(alpha = 0.6f))
+                            Text(stringResource(R.string.debug_ui_no_sockets), fontFamily = BitchatFontFamily, fontSize = 11.sp, color = colorScheme.onSurface.copy(alpha = 0.6f))
                         } else {
                             wifiAwareConnected.entries.take(50).forEach { (peer, ip) ->
                                 Text("• ${peer.take(8)}… @ $ip", fontFamily = BitchatFontFamily, fontSize = 12.sp)
@@ -828,7 +832,7 @@ fun DebugSettingsSheet(
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(Icons.Filled.SettingsEthernet, contentDescription = null, tint = Color(0xFF9C27B0))
-                            Text("Sync settings", fontFamily = BitchatFontFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text(stringResource(R.string.debug_sync_settings), fontFamily = BitchatFontFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         }
                         Text(stringResource(R.string.debug_max_packets_per_sync_fmt, seenCapacity), fontFamily = BitchatFontFamily, fontSize = 11.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
                         Slider(value = seenCapacity.toFloat(), onValueChange = { manager.setSeenPacketCapacity(it.toInt()) }, valueRange = 10f..1000f, steps = 99)
@@ -854,7 +858,7 @@ fun DebugSettingsSheet(
                         val localAddr = remember { meshService.connectionManager.getLocalAdapterAddress() }
                         Text(stringResource(R.string.debug_our_device_id_fmt, localAddr ?: stringResource(R.string.unknown)), fontFamily = BitchatFontFamily, fontSize = 11.sp, color = colorScheme.onSurface.copy(alpha = 0.7f))
                         if (connectedDevices.isEmpty()) {
-                            Text("None", fontFamily = BitchatFontFamily, fontSize = 11.sp, color = colorScheme.onSurface.copy(alpha = 0.6f))
+                            Text(stringResource(R.string.debug_none), fontFamily = BitchatFontFamily, fontSize = 11.sp, color = colorScheme.onSurface.copy(alpha = 0.6f))
                         } else {
                             connectedDevices.forEach { dev ->
                                 Surface(shape = RoundedCornerShape(8.dp), color = colorScheme.surface.copy(alpha = 0.6f)) {

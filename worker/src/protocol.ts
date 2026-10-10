@@ -1,4 +1,5 @@
 export const VERSION = 1;
+export const MAX_PACKET_BYTES = 65536;
 const encoder = new TextEncoder();
 export const HEX_KEY = /^[a-f0-9]{64}$/;
 export const PEER_ID = /^[a-f0-9]{16}$/;

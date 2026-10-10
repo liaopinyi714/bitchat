@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./index";
-import { authenticate, decodePacket, numberLimit, packetInfo, parseFrame, PEER_ID, ProtocolError, sha256, toHex, VERSION, type Identity } from "./protocol";
+import { authenticate, decodePacket, MAX_PACKET_BYTES, numberLimit, packetInfo, parseFrame, PEER_ID, ProtocolError, sha256, toHex, VERSION, type Identity } from "./protocol";
 
 interface Attachment {
   nonce: string;
@@ -12,10 +12,13 @@ interface Attachment {
   announcement?: string;
   windowAt: number;
   used: number;
+  authenticating?: boolean;
+  failed?: boolean;
 }
 
 abstract class RelayObject extends DurableObject<Env> {
   protected abstract get kind(): "room" | "mail";
+  private pendingUpgrades = 0;
 
   private roomConfig(): { owner: string; commitment: string | null } | undefined {
     if (this.kind !== "room") return;
@@ -35,25 +38,28 @@ abstract class RelayObject extends DurableObject<Env> {
     let active = 0;
     for (const socket of this.ctx.getWebSockets()) {
       const state = socket.deserializeAttachment() as Attachment | null;
-      if (!state?.identity && Date.now() - (state?.openedAt ?? 0) > 30000) {
+      if (state?.failed || (!state?.identity && Date.now() - (state?.openedAt ?? 0) > 30000)) {
         try { socket.close(1008, "authentication_expired"); } catch { /* closed */ }
       } else active++;
     }
-    if (active >= max) return new Response("Busy", { status: 429 });
-    const scope = new URL(request.url).pathname.split("/").at(-1)!;
-    const pair = new WebSocketPair();
-    const client = pair[0];
-    const server = pair[1];
-    const now = Date.now();
-    const keys = await crypto.subtle.generateKey("X25519", true, ["deriveBits"]) as CryptoKeyPair;
-    const challengeKey = toHex(await crypto.subtle.exportKey("raw", keys.publicKey) as ArrayBuffer);
-    const challengePrivate = toHex(await crypto.subtle.exportKey("pkcs8", keys.privateKey) as ArrayBuffer);
-    const state: Attachment = { nonce: crypto.randomUUID(), challengeKey, challengePrivate, openedAt: now, scope, windowAt: now, used: 0 };
-    this.ctx.acceptWebSocket(server);
-    server.serializeAttachment(state);
-    const config = this.roomConfig();
-    server.send(JSON.stringify({ type: "challenge", protocol: VERSION, nonce: state.nonce, key: challengeKey, kind: this.kind, scope, owner: config?.owner, commitment: config?.commitment ?? undefined }));
-    return new Response(null, { status: 101, webSocket: client });
+    if (active + this.pendingUpgrades >= max) return new Response("Busy", { status: 429 });
+    this.pendingUpgrades++;
+    try {
+      const scope = new URL(request.url).pathname.split("/").at(-1)!;
+      const pair = new WebSocketPair();
+      const client = pair[0];
+      const server = pair[1];
+      const now = Date.now();
+      const keys = await crypto.subtle.generateKey("X25519", true, ["deriveBits"]) as CryptoKeyPair;
+      const challengeKey = toHex(await crypto.subtle.exportKey("raw", keys.publicKey) as ArrayBuffer);
+      const challengePrivate = toHex(await crypto.subtle.exportKey("pkcs8", keys.privateKey) as ArrayBuffer);
+      const state: Attachment = { nonce: crypto.randomUUID(), challengeKey, challengePrivate, openedAt: now, scope, windowAt: now, used: 0 };
+      this.ctx.acceptWebSocket(server);
+      server.serializeAttachment(state);
+      const config = this.roomConfig();
+      server.send(JSON.stringify({ type: "challenge", protocol: VERSION, nonce: state.nonce, key: challengeKey, kind: this.kind, scope, owner: config?.owner, commitment: config?.commitment ?? undefined }));
+      return new Response(null, { status: 101, webSocket: client });
+    } finally { this.pendingUpgrades--; }
   }
 
   async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): Promise<void> {
@@ -63,15 +69,21 @@ abstract class RelayObject extends DurableObject<Env> {
       const frame = parseFrame(raw, max);
       const state = ws.deserializeAttachment() as Attachment;
       if (!state) throw new ProtocolError("missing_session");
+      if (state.failed) return;
       const now = Date.now();
       if (now - state.windowAt >= 60000) { state.windowAt = now; state.used = 0; }
       if (++state.used > numberLimit(this.env.PACKETS_PER_MINUTE, 2400, 60000)) throw new ProtocolError("rate_limit");
       ws.serializeAttachment(state);
 
       if (!state.identity) {
-        if (frame.type !== "auth" || now - state.openedAt > 30000) throw new ProtocolError("authentication_required");
-        state.identity = await authenticate(frame, this.kind, state.scope, state.nonce, state.challengeKey, state.challengePrivate);
-        if (this.kind === "mail" && state.identity.peer !== state.scope) throw new ProtocolError("mailbox_owner");
+        if (frame.type !== "auth" || state.authenticating || now - state.openedAt > 30000) throw new ProtocolError("authentication_required");
+        state.authenticating = true;
+        ws.serializeAttachment(state);
+        const identity = await authenticate(frame, this.kind, state.scope, state.nonce, state.challengeKey, state.challengePrivate);
+        if ((ws.deserializeAttachment() as Attachment | null)?.failed || Date.now() - state.openedAt > 30000) throw new ProtocolError("authentication_expired");
+        if (this.kind === "mail" && identity.peer !== state.scope) throw new ProtocolError("mailbox_owner");
+        state.identity = identity;
+        state.authenticating = false;
         if (this.kind === "room") {
           this.roomConfig();
           this.ctx.storage.sql.exec("INSERT OR IGNORE INTO room_config (singleton,owner) VALUES (1,?)", state.identity.noise);
@@ -113,7 +125,7 @@ abstract class RelayObject extends DurableObject<Env> {
         return;
       }
       if (frame.type !== "packet") throw new ProtocolError("unknown_type");
-      const packet = decodePacket(frame.packet, Math.floor(max * 0.7));
+      const packet = decodePacket(frame.packet, MAX_PACKET_BYTES);
       const info = packetInfo(packet);
       const historical = frame.historical === true;
       if (historical && (this.kind !== "room" || ![1, 2].includes(info.type))) throw new ProtocolError("invalid_history");
@@ -155,6 +167,8 @@ abstract class RelayObject extends DurableObject<Env> {
       ws.send(JSON.stringify({ type: "accepted", id }));
     } catch (error) {
       const code = error instanceof ProtocolError ? error.message : "internal_error";
+      const state = ws.deserializeAttachment() as Attachment | null;
+      if (state) { state.failed = true; state.challengePrivate = ""; state.nonce = ""; ws.serializeAttachment(state); }
       try { ws.send(JSON.stringify({ type: "error", code })); ws.close(1008, code); } catch { /* already closed */ }
     }
   }
@@ -178,7 +192,7 @@ abstract class RelayObject extends DurableObject<Env> {
     }
     if (!sent) {
       const frame = parseFrame(item.frame, numberLimit(this.env.MAX_FRAME_BYTES, 98304, 1048576));
-      const bytes = decodePacket(frame.packet, 65536);
+      const bytes = decodePacket(frame.packet, MAX_PACKET_BYTES);
       // Only Noise ciphertext is queued. Announcements, handshake packets and live
       // audio are ephemeral: established-session delivery stays on the sender outbox.
       if (packetInfo(bytes).type !== 0x11) return new Response(null, { status: 202 });

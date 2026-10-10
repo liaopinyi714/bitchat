@@ -241,13 +241,6 @@ class CommandProcessor(
             }
             val newPassword = parts[1]
             channelManager.setChannelPassword(currentChannel, newPassword)
-            val systemMessage = BitchatMessage(
-                sender = "system",
-                content = text(R.string.command_password_changed, currentChannel),
-                timestamp = Date(),
-                isRelay = false
-            )
-            channelManager.addChannelMessage(currentChannel,systemMessage,null)
         }
         else{
             val systemMessage = BitchatMessage(

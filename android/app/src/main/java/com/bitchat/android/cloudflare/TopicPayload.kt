@@ -19,6 +19,7 @@ object TopicPayload {
     private val keys = ConcurrentHashMap<String, SecretKeySpec>()
     private val commitments = ConcurrentHashMap<String, String>()
     private val protectedTopics = ConcurrentHashMap.newKeySet<String>()
+    private val pendingKeys = ConcurrentHashMap<String, SecretKeySpec>()
     val joinedTopics = ConcurrentHashMap.newKeySet<String>()
     data class Decoded(val channel: String, val content: ByteArray)
     @Volatile var currentChannel: String? = null
@@ -53,11 +54,11 @@ object TopicPayload {
     }
 
     fun commitment(key: SecretKeySpec): String = hex(MessageDigest.getInstance("SHA-256").digest(key.encoded))
-    fun expectedCommitment(channel: String): String? = commitments[normalize(channel)]
-    fun hasKey(channel: String): Boolean = keys.containsKey(normalize(channel))
-    fun requirePassword(channel: String) { protectedTopics.add(normalize(channel)) }
+    @Synchronized fun expectedCommitment(channel: String): String? = commitments[normalize(channel)]
+    @Synchronized fun hasKey(channel: String): Boolean = keys.containsKey(normalize(channel))
+    @Synchronized fun requirePassword(channel: String) { protectedTopics.add(normalize(channel)) }
 
-    fun setKey(channel: String, key: SecretKeySpec): Boolean {
+    @Synchronized fun setKey(channel: String, key: SecretKeySpec): Boolean {
         val name = normalize(channel)
         val value = commitment(key)
         if (commitments[name]?.let { it != value } == true) return false
@@ -67,14 +68,31 @@ object TopicPayload {
         return true
     }
 
-    fun replaceKey(channel: String, key: SecretKeySpec) {
+    @Synchronized fun replaceKey(channel: String, key: SecretKeySpec) {
         val name = normalize(channel)
         keys[name] = key
         protectedTopics.add(name)
         commitments[name] = commitment(key)
     }
 
-    fun requireCommitment(channel: String, value: String) {
+    /** Keep the active key until the relay acknowledges a password change. */
+    @Synchronized fun stageProtection(channel: String, key: SecretKeySpec) {
+        pendingKeys[normalize(channel)] = key
+    }
+
+    @Synchronized fun pendingCommitment(channel: String): String? = pendingKeys[normalize(channel)]?.let(::commitment)
+    @Synchronized fun discardPendingProtection(channel: String) { pendingKeys.remove(normalize(channel)) }
+
+    @Synchronized fun confirmProtection(channel: String, value: String): Boolean {
+        val name = normalize(channel)
+        val key = pendingKeys[name] ?: return false
+        if (commitment(key) != value) return false
+        replaceKey(name, key)
+        pendingKeys.remove(name)
+        return true
+    }
+
+    @Synchronized fun requireCommitment(channel: String, value: String) {
         require(value.matches(Regex("[a-f0-9]{64}")))
         val name = normalize(channel)
         protectedTopics.add(name)
@@ -88,8 +106,8 @@ object TopicPayload {
     fun encode(channel: String, bytes: ByteArray): ByteArray {
         val name = normalize(channel)
         val nameBytes = name.toByteArray(Charsets.UTF_8)
-        val key = keys[name]
-        require(!protectedTopics.contains(name) || key != null) { "Channel password required" }
+        val (key, protected) = synchronized(this) { keys[name] to protectedTopics.contains(name) }
+        require(!protected || key != null) { "Channel password required" }
         val header = ByteBuffer.allocate(magic.size + 2 + nameBytes.size + 1 + if (key != null) 32 else 0)
             .order(ByteOrder.BIG_ENDIAN).put(magic).putShort(nameBytes.size.toShort()).put(nameBytes).put((if (key != null) 1 else 0).toByte())
         if (key != null) header.put(unhex(commitment(key)))
@@ -114,29 +132,37 @@ object TopicPayload {
             require(nameBytes.contentEquals(channel.toByteArray(Charsets.UTF_8)))
             val mode = buffer.get().toInt()
             if (mode == 0) {
-                require(!protectedTopics.contains(channel)) { "Protected channel received plaintext" }
-                Decoded(channel, ByteArray(buffer.remaining()).also(buffer::get))
+                val content = ByteArray(buffer.remaining()).also(buffer::get)
+                synchronized(this) {
+                    require(!protectedTopics.contains(channel)) { "Protected channel received plaintext" }
+                    Decoded(channel, content)
+                }
             } else {
                 require(mode == 1 && buffer.remaining() >= 32 + 12 + 16)
                 val declared = hex(ByteArray(32).also(buffer::get))
-                val key = keys[channel] ?: return null
-                require(commitment(key) == declared && commitments[channel] == declared)
+                val key = synchronized(this) {
+                    keys[channel]?.takeIf { commitments[channel] == declared }
+                } ?: return null
+                require(commitment(key) == declared)
                 val aad = bytes.copyOfRange(0, buffer.position())
                 val iv = ByteArray(12).also(buffer::get)
                 val encrypted = ByteArray(buffer.remaining()).also(buffer::get)
                 val cipher = Cipher.getInstance("AES/GCM/NoPadding")
                 cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
                 cipher.updateAAD(aad)
-                Decoded(channel, cipher.doFinal(encrypted))
+                val content = cipher.doFinal(encrypted)
+                synchronized(this) {
+                    if (commitments[channel] == declared && keys[channel] != null) Decoded(channel, content) else null
+                }
             }
         } catch (_: Exception) { null }
     }
 
-    fun forget(channel: String) {
+    @Synchronized fun forget(channel: String) {
         val name = normalize(channel)
-        keys.remove(name); commitments.remove(name); protectedTopics.remove(name); joinedTopics.remove(name)
+        keys.remove(name); commitments.remove(name); pendingKeys.remove(name); protectedTopics.remove(name); joinedTopics.remove(name)
     }
-    fun clear() { keys.clear(); commitments.clear(); protectedTopics.clear(); joinedTopics.clear(); currentChannel = null }
+    @Synchronized fun clear() { keys.clear(); commitments.clear(); pendingKeys.clear(); protectedTopics.clear(); joinedTopics.clear(); currentChannel = null }
     fun hex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
     fun unhex(value: String): ByteArray {
         require(value.length % 2 == 0 && value.matches(Regex("[a-f0-9]+")))

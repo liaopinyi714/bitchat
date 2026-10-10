@@ -26,9 +26,13 @@ The proof is HMAC-SHA256 of these bytes, keyed by X25519(client static private k
 
 After authentication the server sends `ready`. Socket attachments retain identity and rate counters across hibernation; the server ephemeral private key and nonce are discarded.
 
+Clients reject ready-before-challenge, protocol mismatches and malformed owner / commitment keys. Authentication has a 30-second client timeout; old connection generations cannot revive a stopped or replaced socket. Failed authentication does not claim room ownership. Concurrent connection upgrades reserve capacity before asynchronous challenge-key generation.
+
 ## Packets and routing
 
 `packet` frames contain `id` (SHA-256 of raw unpadded binary bytes), `packet` (base64), and optional mailbox `target`. Packets retain the upstream v1/v2 binary format. Public packets are signed. Upstream fragment wrappers are unsigned; their reassembled inner packet must pass the normal signature check.
+
+Raw binary packets are limited to 65536 bytes independently of the configured JSON frame limit. JSON must still fit `MAX_FRAME_BYTES`, including base64 and routing metadata. A transport write has a bounded client queue and is not a persistent buffer.
 
 Normal room traffic must originate from the authenticated sender, and cannot have a private recipient or target. Normal mailbox traffic must originate from its owner and match its target recipient; directed identity announcements are the exception to the original announcement's recipient field.
 
@@ -55,6 +59,8 @@ mode 1:
 AES key: PBKDF2-HMAC-SHA256(password, UTF-8 `bitchat/topic-key/v1\n<channel>`, 600000 iterations, 32 bytes). Key derivation runs off the UI thread. GCM AAD is the complete header through the key commitment, binding the name and encryption mode.
 
 Known protected channels reject mode 0, missing keys, incorrect commitments, altered names and invalid tags. Keys are process-memory only. The server records the creator's Noise key and commitment, never the password or AES key. The authenticated creator may set a commitment with `protect`; a changed commitment closes other connections so they rejoin. Repeating the same commitment does not disconnect members.
+
+Password rotation keeps the active key until an exact `protected` acknowledgement or matching reconnect metadata confirms the staged commitment. Unavailable connections fail without replacing the key. Leaving or clearing invalidates both pending derivation and staged keys. A confirmed rotation clears the room's recent-history cache. A non-creator cannot treat a local password as protection for an existing public room.
 
 Shared passwords permit offline guessing against the public commitment. Use strong passwords. This scheme is content encryption, not MLS, member revocation or group forward secrecy. Room IDs and metadata do not hide channel existence.
 

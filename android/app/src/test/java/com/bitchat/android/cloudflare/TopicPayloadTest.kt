@@ -58,4 +58,29 @@ class TopicPayloadTest {
         assertFalse(TopicPayload.hasKey("#test"))
         assertNull(TopicPayload.decode(encrypted))
     }
+
+    @Test fun pendingProtectionOnlyReplacesTheKeyAfterAnExactAcknowledgement() {
+        val oldKey = SecretKeySpec(ByteArray(32) { 7 }, "AES")
+        val newKey = SecretKeySpec(ByteArray(32) { 8 }, "AES")
+        TopicPayload.setKey("#test", oldKey)
+        val oldPacket = TopicPayload.encode("#test", byteArrayOf(1))
+        TopicPayload.stageProtection("#test", newKey)
+        assertEquals(TopicPayload.commitment(oldKey), TopicPayload.expectedCommitment("#test"))
+        assertNotNull(TopicPayload.decode(oldPacket))
+        assertFalse(TopicPayload.confirmProtection("#test", "a".repeat(64)))
+        assertTrue(TopicPayload.confirmProtection("#test", TopicPayload.commitment(newKey)))
+        assertNull(TopicPayload.pendingCommitment("#test"))
+        assertNull(TopicPayload.decode(oldPacket))
+        assertNotNull(TopicPayload.decode(TopicPayload.encode("#test", byteArrayOf(2))))
+    }
+
+    @Test fun panicAndLeaveForgetPendingProtection() {
+        val key = SecretKeySpec(ByteArray(32) { 7 }, "AES")
+        TopicPayload.stageProtection("#test", key)
+        TopicPayload.forget("#test")
+        assertFalse(TopicPayload.confirmProtection("#test", TopicPayload.commitment(key)))
+        TopicPayload.stageProtection("#test", key)
+        TopicPayload.clear()
+        assertFalse(TopicPayload.confirmProtection("#test", TopicPayload.commitment(key)))
+    }
 }

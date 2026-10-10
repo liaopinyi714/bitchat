@@ -147,5 +147,6 @@ private fun topicStatusResource(status: String?): Int = when (status) {
     "connected" -> R.string.topic_online
     "connecting" -> R.string.topic_connecting
     "password_required" -> R.string.topic_password_required
+    "public_room_password" -> R.string.topic_public_password_error
     else -> R.string.topic_offline
 }
