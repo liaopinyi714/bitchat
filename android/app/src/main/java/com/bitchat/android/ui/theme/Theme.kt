@@ -1,9 +1,6 @@
 package com.bitchat.android.ui.theme
 
 import android.app.Activity
-import android.os.Build
-import android.view.View
-import android.view.WindowInsetsController
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -16,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 
 // Standard UI semantics live in Material so stock components and custom Bitchat composables
 // share one source of truth. LocalBitchatPalette below only supplies app-specific extra colors.
@@ -88,21 +86,15 @@ fun BitchatTheme(
     val view = LocalView.current
     SideEffect {
         (view.context as? Activity)?.window?.let { window ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                window.insetsController?.setSystemBarsAppearance(
-                    if (!shouldUseDark) WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS else 0,
-                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                window.decorView.systemUiVisibility = if (!shouldUseDark) {
-                    View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-                } else 0
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !shouldUseDark
+                isAppearanceLightNavigationBars = !shouldUseDark
             }
-            window.navigationBarColor = colorScheme.background.toArgb()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                window.isNavigationBarContrastEnforced = false
-            }
+            // Let each screen's surface continue behind the navigation bar, including
+            // three-button navigation on Android 14. Do not paint a separate color strip.
+            @Suppress("DEPRECATION")
+            window.navigationBarColor = Color.Transparent.toArgb()
+            window.isNavigationBarContrastEnforced = false
         }
     }
 

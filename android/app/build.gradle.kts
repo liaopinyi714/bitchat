@@ -36,8 +36,8 @@ android {
         applicationId = "xyz.liaopinyi714.bitchat"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 9
-        versionName = "0.2.1"
+        versionCode = 10
+        versionName = "0.2.2"
         buildConfigField("String", "RELAY_URL", "\"wss://chat.123456714.xyz\"")
         buildConfigField(
             "String",

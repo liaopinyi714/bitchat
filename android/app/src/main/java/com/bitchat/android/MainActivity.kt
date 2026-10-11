@@ -247,7 +247,8 @@ class MainActivity : OrientationAwareActivity() {
             
             OnboardingState.PERMISSION_EXPLANATION -> {
                 PermissionExplanationScreen(
-                    modifier = modifier,
+                    // This screen paints behind system bars and applies its own content insets.
+                    modifier = Modifier.fillMaxSize(),
                     permissionCategories = permissionManager.getCategorizedPermissions(),
                     onSkip = { onboardingCoordinator.skipLocalDiscovery() },
                     onContinue = {

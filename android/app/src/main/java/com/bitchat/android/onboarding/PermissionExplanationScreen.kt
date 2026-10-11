@@ -19,7 +19,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
@@ -40,15 +39,56 @@ fun PermissionExplanationScreen(
     val colorScheme = MaterialTheme.colorScheme
     val scrollState = rememberScrollState()
 
-    Box(
-        modifier = modifier
-    ) {
-        // Scrollable content
+    Scaffold(
+        modifier = modifier,
+        containerColor = colorScheme.background,
+        contentWindowInsets = WindowInsets.safeDrawing,
+        bottomBar = {
+            // Paint the whole bottom area first; only the controls avoid system UI.
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = colorScheme.surface,
+                shadowElevation = 8.dp
+            ) {
+                Column(
+                    modifier = Modifier.windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(
+                            WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom
+                        )
+                    )
+                ) {
+                    Button(
+                        onClick = onContinue,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 16.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colorScheme.primary
+                        )
+                    ) {
+                        Text(
+                            text = stringResource(R.string.grant_permissions),
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = BitchatFontFamily,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                    }
+                    TextButton(onClick = onSkip, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.topic_online_only), fontFamily = BitchatFontFamily)
+                    }
+                }
+            }
+        }
+    ) { contentPadding ->
+        // Reserve the measured button-bar height, including navigation insets and large fonts.
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .padding(contentPadding)
+                .consumeWindowInsets(contentPadding)
                 .padding(horizontal = 24.dp)
-                .padding(bottom = 88.dp) // Leave space for the fixed button
                 .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -145,38 +185,6 @@ fun PermissionExplanationScreen(
             Spacer(modifier = Modifier.height(24.dp))
         }
 
-        // Fixed button at bottom
-        Surface(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth(),
-            color = colorScheme.surface,
-            shadowElevation = 8.dp
-        ) {
-            Column {
-            Button(
-                onClick = onContinue,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = colorScheme.primary
-                )
-            ) {
-                Text(
-                    text = stringResource(R.string.grant_permissions),
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = BitchatFontFamily,
-                        fontWeight = FontWeight.Bold
-                    ),
-                    modifier = Modifier.padding(vertical = 4.dp)
-                )
-            }
-            TextButton(onClick = onSkip, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.topic_online_only), fontFamily = BitchatFontFamily)
-            }
-            }
-        }
     }
 }
 
