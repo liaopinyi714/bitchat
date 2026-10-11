@@ -203,7 +203,9 @@ class BluetoothConnectionManager(
                 
                 toEvict.forEach { conn ->
                     if (conn.isClient) {
-                        try { conn.gatt?.disconnect() } catch (_: Exception) { }
+                        try { conn.gatt?.disconnect() } catch (_: SecurityException) {
+                            Log.w(TAG, "Bluetooth permission revoked while enforcing connection limits")
+                        } catch (_: RuntimeException) { }
                     } else {
                         serverManager.disconnectDevice(conn.device)
                     }
@@ -423,8 +425,9 @@ class BluetoothConnectionManager(
         }
     }
 
-    // Expose local adapter address for debug UI
-    fun getLocalAdapterAddress(): String? = try { bluetoothAdapter?.address } catch (e: Exception) { null }
+    // Android reserves the local hardware address for privileged system apps. The
+    // ordinary application only receives a placeholder; never present it as an ID.
+    fun getLocalAdapterAddress(): String? = null
 
     fun isClientConnection(address: String): Boolean? {
         return try { connectionTracker.getConnectedDevices()[address]?.isClient } catch (e: Exception) { null }

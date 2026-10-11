@@ -3,6 +3,7 @@ package com.bitchat.android.mesh
 import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
@@ -42,12 +43,15 @@ abstract class MeshConnectionTracker(
     // Tracks in-progress or failed attempts
     protected val pendingConnections = ConcurrentHashMap<String, ConnectionAttempt>()
 
-    private var isActive = false
+    @Volatile private var isActive = false
+    private var cleanupJob: Job? = null
 
     /**
      * Start the tracker and its cleanup loop
      */
+    @Synchronized
     open fun start() {
+        if (isActive) return
         isActive = true
         startPeriodicCleanup()
     }
@@ -55,8 +59,11 @@ abstract class MeshConnectionTracker(
     /**
      * Stop the tracker
      */
+    @Synchronized
     open fun stop() {
         isActive = false
+        cleanupJob?.cancel()
+        cleanupJob = null
         pendingConnections.clear()
     }
 
@@ -119,7 +126,7 @@ abstract class MeshConnectionTracker(
     abstract fun getConnectionCount(): Int
 
     private fun startPeriodicCleanup() {
-        scope.launch {
+        cleanupJob = scope.launch {
             while (isActive) {
                 try {
                     delay(CLEANUP_INTERVAL)
@@ -127,7 +134,8 @@ abstract class MeshConnectionTracker(
 
                     // Clean up expired pending connections
                     val expired = pendingConnections.filter { it.value.isExpired() }
-                    expired.keys.forEach { pendingConnections.remove(it) }
+                    // Do not erase a replacement attempt recorded after this snapshot.
+                    expired.forEach { (id, attempt) -> pendingConnections.remove(id, attempt) }
 
                     if (expired.isNotEmpty()) {
                         Log.d(tag, "Cleaned up ${expired.size} expired connection attempts")

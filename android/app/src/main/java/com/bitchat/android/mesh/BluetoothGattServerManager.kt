@@ -54,6 +54,7 @@ class BluetoothGattServerManager(
     @Volatile private var isActive = false
     @Volatile private var generation = 0L
     private var startupJob: Job? = null
+    private var advertiseRestartJob: Job? = null
 
     private fun isBleTransportEnabled(): Boolean {
         return try {
@@ -74,6 +75,8 @@ class BluetoothGattServerManager(
     fun disconnectDevice(device: BluetoothDevice) {
         try {
             gattServer?.cancelConnection(device)
+        } catch (_: SecurityException) {
+            Log.w(TAG, "Bluetooth permission revoked during server disconnect")
         } catch (e: Exception) {
             Log.w(TAG, "Error disconnecting device ${device.address}: ${e.message}")
         }
@@ -98,7 +101,8 @@ class BluetoothGattServerManager(
             return false
         }
         
-        if (bluetoothAdapter?.isEnabled != true) {
+        val enabled = try { bluetoothAdapter?.isEnabled == true } catch (_: SecurityException) { false }
+        if (!enabled) {
             Log.e(TAG, "Bluetooth is not enabled")
             return false
         }
@@ -133,12 +137,18 @@ class BluetoothGattServerManager(
         generation++
         startupJob?.cancel()
         startupJob = null
+        advertiseRestartJob?.cancel()
+        advertiseRestartJob = null
         stopAdvertising()
         // Complete cleanup before the owner cancels connectionScope.
         val server = gattServer
         gattServer = null
         serverLinkIDs.clear()
         connectionTracker.getConnectedDevices().values.filter { !it.isClient }.forEach { dc ->
+            val peerID = connectionTracker.addressPeerMap[dc.device.address]
+            if (connectionTracker.cleanupDeviceConnectionIfCurrent(dc.device.address, dc.linkID)) {
+                delegate?.onDeviceDisconnected(dc.device, dc.linkID, peerID)
+            }
             try {
                 server?.cancelConnection(dc.device)
             } catch (_: SecurityException) {
@@ -171,6 +181,7 @@ class BluetoothGattServerManager(
      * Setup GATT server with proper sequencing
      */
     @Suppress("DEPRECATION")
+    @androidx.annotation.RequiresPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
     @Synchronized
     private fun setupGattServer() {
         val serverGeneration = generation
@@ -179,57 +190,56 @@ class BluetoothGattServerManager(
         
         val serverCallback = object : BluetoothGattServerCallback() {
             override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
-                // Guard against callbacks after service shutdown
-                if (!isCurrent()) {
-                    return
-                }
-
-                when (newState) {
-                    BluetoothProfile.STATE_CONNECTED -> {
-                        Log.i(TAG, "Connected to ${device.address} (server)")
-                        val linkID = UUID.randomUUID().toString()
-                        serverLinkIDs[device.address] = linkID
-                        
-                        // Get best available RSSI (scan RSSI for server connections)
-                        val rssi = connectionTracker.getBestRSSI(device.address) ?: Int.MIN_VALUE
-                        
-                        val deviceConn = BluetoothConnectionTracker.DeviceConnection(
-                            device = device,
-                            rssi = rssi,
-                            isClient = false,
-                            linkID = linkID
-                        )
-                        connectionTracker.addDeviceConnection(device.address, deviceConn)
-
-                        connectionScope.launch {
-                            delay(1000)
-                            if (isCurrent()) { // Check if still active
-                                delegate?.onDeviceConnected(device)
-                            }
-                        }
+                synchronized(this@BluetoothGattServerManager) {
+                    // Guard against callbacks after service shutdown
+                    if (!isCurrent()) {
+                        return
                     }
-                    BluetoothProfile.STATE_DISCONNECTED -> {
-                        Log.i(TAG, "Disconnected from ${device.address} (server)")
-                        val linkID = serverLinkIDs.remove(device.address)
-                        // Capture the observed peer before cleanup drops the address mapping.
-                        val disconnectedPeerID = connectionTracker.addressPeerMap[device.address]
-                        if (linkID != null) {
-                            connectionTracker.cleanupDeviceConnectionIfCurrent(device.address, linkID)
+
+                    when (newState) {
+                        BluetoothProfile.STATE_CONNECTED -> {
+                            Log.i(TAG, "Connected to ${device.address} (server)")
+                            val linkID = UUID.randomUUID().toString()
+                            serverLinkIDs[device.address] = linkID
+                        
+                            // Get best available RSSI (scan RSSI for server connections)
+                            val rssi = connectionTracker.getBestRSSI(device.address) ?: Int.MIN_VALUE
+                        
+                            val deviceConn = BluetoothConnectionTracker.DeviceConnection(
+                                device = device,
+                                rssi = rssi,
+                                isClient = false,
+                                linkID = linkID
+                            )
+                            connectionTracker.addDeviceConnection(device.address, deviceConn)
+
                         }
-                        // Notify delegate about device disconnection so higher layers can update direct flags
-                        delegate?.onDeviceDisconnected(device, linkID, disconnectedPeerID)
+                        BluetoothProfile.STATE_DISCONNECTED -> {
+                            Log.i(TAG, "Disconnected from ${device.address} (server)")
+                            val linkID = serverLinkIDs.remove(device.address)
+                            // Capture the observed peer before cleanup drops the address mapping.
+                            val disconnectedPeerID = connectionTracker.addressPeerMap[device.address]
+                            if (linkID != null) {
+                                connectionTracker.cleanupDeviceConnectionIfCurrent(device.address, linkID)
+                            }
+                            // Notify delegate about device disconnection so higher layers can update direct flags
+                            delegate?.onDeviceDisconnected(device, linkID, disconnectedPeerID)
+                        }
                     }
                 }
             }
             
             override fun onServiceAdded(status: Int, service: BluetoothGattService) {
-                // Guard against callbacks after service shutdown
-                if (!isCurrent()) {
-                    return
-                }
+                synchronized(this@BluetoothGattServerManager) {
+                    // Guard against callbacks after service shutdown
+                    if (!isCurrent()) {
+                        return
+                    }
 
-                if (status != BluetoothGatt.GATT_SUCCESS) {
-                    Log.e(TAG, "Server: Failed to add service: ${service.uuid}, status: $status")
+                    if (status != BluetoothGatt.GATT_SUCCESS) {
+                        Log.e(TAG, "Server: Failed to add service: ${service.uuid}, status: $status")
+                        stop()
+                    }
                 }
             }
             
@@ -242,36 +252,42 @@ class BluetoothGattServerManager(
                 offset: Int,
                 value: ByteArray
             ) {
-                // Guard against callbacks after service shutdown
-                if (!isCurrent()) {
-                    return
-                }
-
-                if (characteristic.uuid == AppConstants.Mesh.Gatt.CHARACTERISTIC_UUID) {
-                    val linkID = serverLinkIDs[device.address]
-                    if (linkID == null) {
-                        Log.d(TAG, "Server: Dropping packet from stale connection ${device.address}")
-                        if (responseNeeded) {
-                            gattServer?.sendResponse(
-                                device,
-                                requestId,
-                                BluetoothGatt.GATT_FAILURE,
-                                0,
-                                null
-                            )
-                        }
+                synchronized(this@BluetoothGattServerManager) {
+                    // Guard against callbacks after service shutdown
+                    if (!isCurrent()) {
                         return
                     }
-                    val packet = BitchatPacket.fromBinaryData(value)
-                    if (packet != null) {
-                        val peerID = packet.senderID.take(8).toByteArray().joinToString("") { "%02x".format(it) }
-                        delegate?.onPacketReceived(packet, peerID, device, linkID)
-                    } else {
-                        Log.d(TAG, "Server: Failed to parse packet from ${device.address}, size: ${value.size} bytes")
+
+                    if (preparedWrite || offset != 0 || characteristic.uuid != AppConstants.Mesh.Gatt.CHARACTERISTIC_UUID) {
+                        if (responseNeeded) sendResponse(device, requestId, BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED, 0, null)
+                        return
                     }
+                    if (characteristic.uuid == AppConstants.Mesh.Gatt.CHARACTERISTIC_UUID) {
+                        val linkID = serverLinkIDs[device.address]
+                        if (linkID == null) {
+                            Log.d(TAG, "Server: Dropping packet from stale connection ${device.address}")
+                            if (responseNeeded) {
+                                sendResponse(
+                                    device,
+                                    requestId,
+                                    BluetoothGatt.GATT_FAILURE,
+                                    0,
+                                    null
+                                )
+                            }
+                            return
+                        }
+                        val packet = BitchatPacket.fromBinaryData(value)
+                        if (packet != null) {
+                            val peerID = packet.senderID.take(8).toByteArray().joinToString("") { "%02x".format(it) }
+                            delegate?.onPacketReceived(packet, peerID, device, linkID)
+                        } else {
+                            Log.d(TAG, "Server: Failed to parse packet from ${device.address}, size: ${value.size} bytes")
+                        }
                     
-                    if (responseNeeded) {
-                        gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+                        if (responseNeeded) {
+                            sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+                        }
                     }
                 }
             }
@@ -285,34 +301,53 @@ class BluetoothGattServerManager(
                 offset: Int,
                 value: ByteArray
             ) {
-                // Guard against callbacks after service shutdown
-                if (!isCurrent()) {
-                    return
-                }
+                synchronized(this@BluetoothGattServerManager) {
+                    // Guard against callbacks after service shutdown
+                    if (!isCurrent()) {
+                        return
+                    }
 
-                if (BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE.contentEquals(value)) {
-                    connectionTracker.addSubscribedDevice(device)
+                    val linkID = serverLinkIDs[device.address]
+                    if (preparedWrite || offset != 0 || linkID == null ||
+                        descriptor.uuid != AppConstants.Mesh.Gatt.DESCRIPTOR_UUID
+                    ) {
+                        if (responseNeeded) sendResponse(device, requestId, BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED, 0, null)
+                        return
+                    }
+                    val enable = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE.contentEquals(value)
+                    val disable = BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE.contentEquals(value)
+                    if (!enable && !disable) {
+                        if (responseNeeded) sendResponse(device, requestId, BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED, 0, null)
+                        return
+                    }
+                    if (enable && connectionTracker.addSubscribedDevice(device)) {
 
-                    connectionScope.launch {
-                        delay(100)
-                        if (isCurrent()) { // Check if still active
-                            delegate?.onDeviceConnected(device)
+                        connectionScope.launch {
+                            delay(100)
+                            synchronized(this@BluetoothGattServerManager) {
+                                if (isCurrent() && serverLinkIDs[device.address] == linkID &&
+                                    connectionTracker.getSubscribedDevices().contains(device)
+                                ) delegate?.onDeviceConnected(device)
+                            }
                         }
                     }
-                }
+                    if (disable) connectionTracker.removeSubscribedDevice(device)
                 
-                if (responseNeeded) {
-                    gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+                    if (responseNeeded) {
+                        sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+                    }
                 }
             }
 
             override fun onNotificationSent(device: BluetoothDevice, status: Int) {
-                if (!isCurrent()) return
-                delegate?.onGattServerNotificationComplete(
-                    device.address,
-                    serverLinkIDs[device.address],
-                    status
-                )
+                synchronized(this@BluetoothGattServerManager) {
+                    if (!isCurrent()) return
+                    delegate?.onGattServerNotificationComplete(
+                        device.address,
+                        serverLinkIDs[device.address],
+                        status
+                    )
+                }
             }
         }
         
@@ -320,13 +355,12 @@ class BluetoothGattServerManager(
         gattServer?.let { server ->
             try {
                 server.close()
+            } catch (_: SecurityException) {
+                Log.w(TAG, "Bluetooth permission revoked while replacing GATT server")
             } catch (e: Exception) {
                 Log.w(TAG, "Error closing existing GATT server: ${e.message}")
             }
         }
-
-        // Small delay to ensure cleanup is complete
-        Thread.sleep(100)
 
         if (!isActive) {
             return
@@ -334,6 +368,10 @@ class BluetoothGattServerManager(
         
         // Create new server
         gattServer = bluetoothManager.openGattServer(context, serverCallback)
+        if (gattServer == null) {
+            stop()
+            return
+        }
         
         // Create characteristic with notification support
         characteristic = BluetoothGattCharacteristic(
@@ -355,15 +393,28 @@ class BluetoothGattServerManager(
         val service = BluetoothGattService(AppConstants.Mesh.Gatt.SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
         service.addCharacteristic(characteristic)
         
-        gattServer?.addService(service)
+        if (gattServer?.addService(service) != true) {
+            stop()
+            return
+        }
         
         Log.i(TAG, "GATT server setup complete")
+    }
+
+    private fun sendResponse(device: BluetoothDevice, requestId: Int, status: Int, offset: Int, value: ByteArray?) {
+        try {
+            gattServer?.sendResponse(device, requestId, status, offset, value)
+        } catch (_: SecurityException) {
+            // Permission may disappear between a callback and its Binder response.
+            stop()
+        }
     }
     
     /**
      * Start advertising
      */
     @Suppress("DEPRECATION")
+    @Synchronized
     private fun startAdvertising() {
         // Respect debug setting
         val enabled = isServerRoleEnabled()
@@ -415,8 +466,10 @@ class BluetoothGattServerManager(
             .setIncludeDeviceName(false)
             .build()
         
+        val advertisingGeneration = generation
         advertiseCallback = object : AdvertiseCallback() {
             override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
+                if (!isActive || generation != advertisingGeneration || advertiseCallback !== this) return
                 advertiseRetryCount = 0
                 val mode = try {
                     powerManager.getPowerInfo().split("Current Mode: ")[1].split("\n")[0]
@@ -425,6 +478,7 @@ class BluetoothGattServerManager(
             }
 
             override fun onStartFailure(errorCode: Int) {
+                if (!isActive || generation != advertisingGeneration || advertiseCallback !== this) return
                 Log.e(TAG, "Advertising failed: $errorCode")
                 // Previously this only logged, so if advertising failed this device became
                 // undiscoverable until a manual BLE toggle. Retry transient failures with backoff.
@@ -459,9 +513,13 @@ class BluetoothGattServerManager(
      */
     @Suppress("DEPRECATION")
     private fun stopAdvertising() {
-        if (!permissionManager.hasBluetoothPermissions() || bleAdvertiser == null) return
+        val callback = advertiseCallback
+        advertiseCallback = null
+        if (bleAdvertiser == null) return
         try {
-            advertiseCallback?.let { cb -> bleAdvertiser.stopAdvertising(cb) }
+            callback?.let { cb -> bleAdvertiser.stopAdvertising(cb) }
+        } catch (_: SecurityException) {
+            Log.w(TAG, "Bluetooth permission revoked while stopping advertising")
         } catch (e: Exception) {
             Log.w(TAG, "Error stopping advertising: ${e.message}")
         }
@@ -474,12 +532,14 @@ class BluetoothGattServerManager(
         advertiseRetryCount++
         val delayMs = (ADVERTISE_RETRY_BASE_MS * advertiseRetryCount).coerceAtMost(ADVERTISE_MAX_RETRY_DELAY_MS)
         Log.w(TAG, "Scheduling advertising restart in ${delayMs}ms (attempt $advertiseRetryCount, reason=$reason)")
-        connectionScope.launch {
+        val restartGeneration = generation
+        advertiseRestartJob?.cancel()
+        advertiseRestartJob = connectionScope.launch {
             delay(delayMs)
-            if (isActive && isServerRoleEnabled()) {
+            if (isActive && generation == restartGeneration && isServerRoleEnabled()) {
                 stopAdvertising()
                 delay(100)
-                startAdvertising()
+                if (generation == restartGeneration) startAdvertising()
             }
         }
     }
@@ -495,10 +555,12 @@ class BluetoothGattServerManager(
             return
         }
 
-        connectionScope.launch {
+        val restartGeneration = generation
+        advertiseRestartJob?.cancel()
+        advertiseRestartJob = connectionScope.launch {
             stopAdvertising()
             delay(100)
-            startAdvertising()
+            if (generation == restartGeneration) startAdvertising()
         }
     }
 }

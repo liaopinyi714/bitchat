@@ -325,19 +325,31 @@
 
     <!-- صيغ الجمع -->
     <plurals name="notification_and_more">
+        <item quantity="zero">و%d إضافية</item>
         <item quantity="one">و%d إضافية</item>
+        <item quantity="two">و%d إضافية</item>
+        <item quantity="few">و%d إضافية</item>
+        <item quantity="many">و%d إضافية</item>
         <item quantity="other">و%d إضافية</item>
     </plurals>
 
     <plurals name="people_count">
+        <item quantity="zero">لا أشخاص</item>
         <item quantity="one">شخص واحد</item>
-        <item quantity="other">%d أشخاص</item>
+        <item quantity="two">شخصان</item>
+        <item quantity="few">%d أشخاص</item>
+        <item quantity="many">%d شخصًا</item>
+        <item quantity="other">%d شخص</item>
     </plurals>
 
   <plurals name="location_notes_title">
-    <item quantity="one">#%1$s ± 1 • %2$d ملاحظة</item>
-    <item quantity="other">#%1$s ± 1 • %2$d ملاحظات</item>
-  </plurals>
+        <item quantity="zero">#%1$s ± 1 • %2$d ملاحظة</item>
+        <item quantity="one">#%1$s ± 1 • %2$d ملاحظة</item>
+        <item quantity="two">#%1$s ± 1 • %2$d ملاحظتان</item>
+        <item quantity="few">#%1$s ± 1 • %2$d ملاحظات</item>
+        <item quantity="many">#%1$s ± 1 • %2$d ملاحظة</item>
+        <item quantity="other">#%1$s ± 1 • %2$d ملاحظة</item>
+    </plurals>
   <string name="location_notes_description">أضف ملاحظات قصيرة ودائمة إلى هذا المكان ليتمكن الزوار الآخرون من العثور عليها.</string>
   <string name="location_notes_relays_unavailable">قنوات الترحيل الجغرافية غير متاحة؛ تم إيقاف الملاحظات</string>
   <string name="location_notes_no_relays_title">لا توجد قنوات ترحيل جغرافية قريبة</string>

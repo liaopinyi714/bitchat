@@ -205,6 +205,9 @@ def check_apk(path, expected_abis, signed):
     require(not any(p in badging for p in (
         "android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_BACKGROUND_LOCATION")), "Location permission in merged APK")
+    require(not any(p in badging for p in (
+        "android.permission.READ_MEDIA_IMAGES", "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO")), "Unneeded media-library permission in merged APK")
     configurations = run_tool([sdk_tool("aapt2"), "dump", "configurations", str(path)]).splitlines()
     for locale in ET.parse(ROOT / "android/app/src/main/res/xml/locales_config.xml").getroot():
         tag = locale.attrib["{http://schemas.android.com/apk/res/android}name"]

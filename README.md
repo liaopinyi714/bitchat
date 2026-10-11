@@ -43,4 +43,4 @@ LICENSE.md           GPL-3.0
 
 本项目使用 Workers Free 与 SQLite Durable Objects，不依赖 R2、D1、KV 或付费推送。免费额度仍有 Cloudflare 平台上限；达到上限时服务可能不可用。容量限制可配置，不能把“免费”理解为无限流量。
 
-当前 0.2.0 使用独立长期签名，按发行候选版本准备；正式发行前仍需完成真实 Android 设备上的蓝牙、网络切换、后台、媒体、语音和升级验收。下载以本仓库 [Releases](https://github.com/liaopinyi714/bitchat/releases) 为准，候选版不会被应用内更新自动选中。源码保留的功能与已验证的功能在功能文档中分别记录。
+当前版本为 **0.2.1**，沿用长期发行签名。本次修复蓝牙订阅、连接超时、反复启停、权限撤销和文件接收的内存开销，并启用会阻止错误发布的 Lint 检查，详情见 [发布说明](docs/RELEASE_NOTES_0.2.1.md)。下载以本仓库 [Releases](https://github.com/liaopinyi714/bitchat/releases) 为准。中文与英文完整性有自动回归；保留的其他语言包可能回退英文。实际手机的后台、无线互通、升级与持续运行需按 [验收清单](docs/OPERATIONS.md) 完成，具体已验证范围见 [测试记录](docs/TESTING.md)。

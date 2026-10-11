@@ -7,12 +7,12 @@ import java.nio.ByteOrder
  * BitchatFilePacket: TLV-encoded file transfer payload for BLE mesh.
  * TLVs:
  *  - 0x01: filename (UTF-8)
- *  - 0x02: file size (8 bytes, UInt64)
+ *  - 0x02: file size (4 bytes, UInt32)
  *  - 0x03: mime type (UTF-8)
  *  - 0x04: content (bytes) — may appear multiple times for large files
  *
- * Length field for TLV is 2 bytes (UInt16, big-endian) for all TLVs.
- * For large files, CONTENT is chunked into multiple TLVs of up to 65535 bytes each.
+ * Length fields are 2 bytes (UInt16, big-endian) except CONTENT, which uses
+ * 4 bytes. The encoder emits one CONTENT; the decoder accepts multiple in order.
  *
  * Unknown TLV types are SKIPPED, not rejected: the tag list above is a floor,
  * not a ceiling, and a decoder that bails on the first tag it does not know
@@ -22,7 +22,7 @@ import java.nio.ByteOrder
  * meant the two implementations disagreed about what a valid packet is.
  *
  * Note: The outer BitchatPacket uses version 2 (4-byte payload length), so this
- * TLV payload can exceed 64 KiB even though each TLV value is limited to 65535 bytes.
+ * TLV payload can exceed 64 KiB; filename and MIME values remain limited to 65535 bytes.
  * Transport-level fragmentation then splits the final packet for BLE MTU.
  */
 data class BitchatFilePacket(
@@ -47,47 +47,47 @@ data class BitchatFilePacket(
     fun encode(): ByteArray? {
         try {
             android.util.Log.d("BitchatFilePacket", "🔄 Encoding: name=$fileName, size=$fileSize, mime=$mimeType")
-        val nameBytes = fileName.toByteArray(Charsets.UTF_8)
-        val mimeBytes = mimeType.toByteArray(Charsets.UTF_8)
-        // Validate bounds for 2-byte TLV lengths (per-TLV). CONTENT may exceed 65535 and will be chunked.
-        if (nameBytes.size > 0xFFFF || mimeBytes.size > 0xFFFF) {
+            val nameBytes = fileName.toByteArray(Charsets.UTF_8)
+            val mimeBytes = mimeType.toByteArray(Charsets.UTF_8)
+            // Only filename and MIME use 2-byte TLV lengths.
+            if (nameBytes.size > 0xFFFF || mimeBytes.size > 0xFFFF) {
                 android.util.Log.e("BitchatFilePacket", "❌ TLV field too large: name=${nameBytes.size}, mime=${mimeBytes.size} (max: 65535)")
                 return null
             }
             if (content.size > 0xFFFF) {
-                android.util.Log.d("BitchatFilePacket", "📦 Content exceeds 65535 bytes (${content.size}); will be split into multiple CONTENT TLVs")
+                android.util.Log.d("BitchatFilePacket", "Content uses a 4-byte TLV length: ${content.size}")
             } else {
                 android.util.Log.d("BitchatFilePacket", "📏 TLV sizes OK: name=${nameBytes.size}, mime=${mimeBytes.size}, content=${content.size}")
             }
-        val sizeFieldLen = 4 // UInt32 for FILE_SIZE (changed from 8 bytes)
-        val contentLenFieldLen = 4 // UInt32 for CONTENT TLV as requested
+            val sizeFieldLen = 4 // UInt32 for FILE_SIZE (changed from 8 bytes)
+            val contentLenFieldLen = 4 // UInt32 for CONTENT TLV as requested
 
-        // Compute capacity: header TLVs + single CONTENT TLV with 4-byte length
-        val contentTLVBytes = 1 + contentLenFieldLen + content.size
-        val capacity = (1 + 2 + nameBytes.size) + (1 + 2 + sizeFieldLen) + (1 + 2 + mimeBytes.size) + contentTLVBytes
-        val buf = ByteBuffer.allocate(capacity).order(ByteOrder.BIG_ENDIAN)
+            // Compute capacity: header TLVs + single CONTENT TLV with 4-byte length
+            val contentTLVBytes = 1 + contentLenFieldLen + content.size
+            val capacity = (1 + 2 + nameBytes.size) + (1 + 2 + sizeFieldLen) + (1 + 2 + mimeBytes.size) + contentTLVBytes
+            val buf = ByteBuffer.allocate(capacity).order(ByteOrder.BIG_ENDIAN)
 
-        // FILE_NAME
-        buf.put(TLVType.FILE_NAME.v.toByte())
-        buf.putShort(nameBytes.size.toShort())
-        buf.put(nameBytes)
+            // FILE_NAME
+            buf.put(TLVType.FILE_NAME.v.toByte())
+            buf.putShort(nameBytes.size.toShort())
+            buf.put(nameBytes)
 
-        // FILE_SIZE (4 bytes)
-        buf.put(TLVType.FILE_SIZE.v.toByte())
-        buf.putShort(sizeFieldLen.toShort())
-        buf.putInt(fileSize.toInt())
+            // FILE_SIZE (4 bytes)
+            buf.put(TLVType.FILE_SIZE.v.toByte())
+            buf.putShort(sizeFieldLen.toShort())
+            buf.putInt(fileSize.toInt())
 
-        // MIME_TYPE
-        buf.put(TLVType.MIME_TYPE.v.toByte())
-        buf.putShort(mimeBytes.size.toShort())
-        buf.put(mimeBytes)
+            // MIME_TYPE
+            buf.put(TLVType.MIME_TYPE.v.toByte())
+            buf.putShort(mimeBytes.size.toShort())
+            buf.put(mimeBytes)
 
-        // CONTENT (single TLV with 4-byte length)
-        buf.put(TLVType.CONTENT.v.toByte())
-        buf.putInt(content.size)
-        buf.put(content)
+            // CONTENT (single TLV with 4-byte length)
+            buf.put(TLVType.CONTENT.v.toByte())
+            buf.putInt(content.size)
+            buf.put(content)
 
-        val result = buf.array()
+            val result = buf.array()
             android.util.Log.d("BitchatFilePacket", "✅ Encoded successfully: ${result.size} bytes total")
             return result
         } catch (e: Exception) {
@@ -104,7 +104,8 @@ data class BitchatFilePacket(
                 var name: String? = null
                 var size: Long? = null
                 var mime: String? = null
-                var contentBytes: ByteArray? = null
+                var contentLength = 0
+                var sawContent = false
                 var skippedUnknownTLVs = 0
                 while (off < data.size) {
                     // Every TLV needs at least a type and a 2-byte length.
@@ -126,7 +127,7 @@ data class BitchatFilePacket(
                         len = ((data[off].toInt() and 0xFF) shl 8) or (data[off + 1].toInt() and 0xFF)
                         off += 2
                     }
-                    if (len < 0 || off + len > data.size) return null
+                    if (len < 0 || len > data.size - off) return null
                     if (t == null) {
                         // Unknown tag: advance past the value without copying it
                         // and without logging. A peer can pad a packet with
@@ -139,30 +140,41 @@ data class BitchatFilePacket(
                         skippedUnknownTLVs += 1
                         continue
                     }
-                    val value = data.copyOfRange(off, off + len)
-                    off += len
                     when (t) {
-                        TLVType.FILE_NAME -> name = String(value, Charsets.UTF_8)
+                        TLVType.FILE_NAME -> name = String(data, off, len, Charsets.UTF_8)
                         TLVType.FILE_SIZE -> {
                             if (len != 4) return null
-                            val bb = ByteBuffer.wrap(value).order(ByteOrder.BIG_ENDIAN)
-                            size = bb.int.toLong()
+                            val bb = ByteBuffer.wrap(data, off, len).order(ByteOrder.BIG_ENDIAN)
+                            size = bb.int.toLong() and 0xFFFFFFFFL
                         }
-                        TLVType.MIME_TYPE -> mime = String(value, Charsets.UTF_8)
+                        TLVType.MIME_TYPE -> mime = String(data, off, len, Charsets.UTF_8)
                         TLVType.CONTENT -> {
-                            // Expect a single CONTENT TLV
-                            if (contentBytes == null) contentBytes = value else {
-                                // If multiple CONTENT TLVs appear, concatenate for tolerance
-                                contentBytes = (contentBytes!! + value)
-                            }
+                            sawContent = true
+                            contentLength += len // Disjoint validated ranges: sum <= data.size.
                         }
                     }
+                    off += len
                 }
                 if (skippedUnknownTLVs > 0) {
                     android.util.Log.d("BitchatFilePacket", "⏭️ Skipped $skippedUnknownTLVs unknown TLV(s)")
                 }
                 val n = name ?: return null
-                val c = contentBytes ?: return null
+                if (!sawContent) return null
+                // Allocate once after validating the complete packet. Repeated CONTENT
+                // fields used to copy the accumulated payload on every iteration (O(n²)).
+                val c = ByteArray(contentLength)
+                val input = ByteBuffer.wrap(data).order(ByteOrder.BIG_ENDIAN)
+                var destination = 0
+                while (input.hasRemaining()) {
+                    val tag = input.get().toInt() and 0xFF
+                    val length = if (tag == 4) input.int else input.short.toInt() and 0xFFFF
+                    if (tag == 4) {
+                        input.get(c, destination, length)
+                        destination += length
+                    } else {
+                        input.position(input.position() + length)
+                    }
+                }
                 val s = size ?: c.size.toLong()
                 val m = mime ?: "application/octet-stream"
                 val result = BitchatFilePacket(n, s, m, c)

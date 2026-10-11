@@ -251,6 +251,28 @@ class FileTransferTest {
     }
 
     @Test
+    fun `decode many small content fields preserves order and skips empty fields`() {
+        val count = 50_000
+        val data = ByteBuffer.allocate(4 + count * 11).order(ByteOrder.BIG_ENDIAN)
+        data.put(1); data.putShort(1); data.put('a'.code.toByte())
+        repeat(count) { index ->
+            data.put(4); data.putInt(0)
+            data.put(4); data.putInt(1); data.put(index.toByte())
+        }
+        val decoded = BitchatFilePacket.decode(data.array())!!
+        assertEquals(count.toLong(), decoded.fileSize)
+        org.junit.Assert.assertArrayEquals(ByteArray(count) { it.toByte() }, decoded.content)
+    }
+
+    @Test
+    fun `oversized content length is rejected without integer overflow`() {
+        val data = ByteBuffer.allocate(9).order(ByteOrder.BIG_ENDIAN)
+        data.put(1); data.putShort(1); data.put('a'.code.toByte())
+        data.put(4); data.putInt(Int.MAX_VALUE)
+        assertNull(BitchatFilePacket.decode(data.array()))
+    }
+
+    @Test
     fun `replaceFilePathInContent should correctly format content markers for different file types`() {
         // Given: Different file types
         val imageMessage = BitchatMessage(

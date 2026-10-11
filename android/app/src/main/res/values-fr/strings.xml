@@ -338,18 +338,21 @@
     <!-- Pluriels -->
     <plurals name="notification_and_more">
         <item quantity="one">et %d de plus</item>
+        <item quantity="many">et %d de plus</item>
         <item quantity="other">et %d de plus</item>
     </plurals>
 
     <plurals name="people_count">
-        <item quantity="one">1 personne</item>
+        <item quantity="one">%d personne</item>
+        <item quantity="many">%d personnes</item>
         <item quantity="other">%d personnes</item>
     </plurals>
 
   <plurals name="location_notes_title">
-    <item quantity="one">#%1$s ± 1 • %2$d note</item>
-    <item quantity="other">#%1$s ± 1 • %2$d notes</item>
-  </plurals>
+        <item quantity="one">#%1$s ± 1 • %2$d note</item>
+        <item quantity="many">#%1$s ± 1 • %2$d notes</item>
+        <item quantity="other">#%1$s ± 1 • %2$d notes</item>
+    </plurals>
   <string name="location_notes_description">ajoutez de courtes notes permanentes à cet endroit pour que d\'autres visiteurs les trouvent.</string>
   <string name="location_notes_relays_unavailable">relais géo indisponibles ; notes en pause</string>
   <string name="location_notes_no_relays_title">aucun relais géo à proximité</string>

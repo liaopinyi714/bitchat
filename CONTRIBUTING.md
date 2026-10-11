@@ -22,7 +22,7 @@ cd android
 python3 ../tools/verify-apk.py --apk-dir app/build/outputs/apk/release --unsigned
 ```
 
-Windows 使用 `gradlew.bat`。建议用短 ASCII 路径运行 Android 工具链；不把个人机器路径写进源码。Lint 任务成功不代表报告没有错误，见 [当前限制](docs/TESTING.md#lint-的限制)。
+Windows 使用 `gradlew.bat`。建议用短 ASCII 路径运行 Android 工具链；不把个人机器路径写进源码。Lint 错误会阻止构建；社区语言缺译保留为警告，中文资源另有强制完整性测试，见 [检查策略](docs/TESTING.md#lint-与语言覆盖)。
 
 手机模块是共享源码的来源，Wear 通过 `syncSharedAppSources` 生成共享代码。不要手动复制共享文件或编辑生成目录。
 

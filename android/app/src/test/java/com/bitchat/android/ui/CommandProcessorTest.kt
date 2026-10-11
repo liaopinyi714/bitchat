@@ -14,7 +14,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import org.junit.Before
-import org.junit.Ignore
+import org.junit.After
+import kotlinx.coroutines.cancel
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.Mockito
@@ -42,6 +43,12 @@ class CommandProcessorTest() {
 
   private val meshService: MeshService = mock()
 
+  @After
+  fun tearDown() {
+    chatState.getJoinedChannelsValue().toList().forEach(channelManager::leaveChannel)
+    testScope.cancel()
+  }
+
   @Before
   fun setup() {
     commandProcessor = CommandProcessor(
@@ -57,7 +64,6 @@ class CommandProcessorTest() {
     )
   }
 
-  @Ignore // Temporarily disabled due to Mockito final class issues
   @Test
   fun `when using lower case join command, command returns true`() {
     val channel = "channel-1"
@@ -70,10 +76,11 @@ class CommandProcessorTest() {
         viewModel = null
     )
 
-    assertEquals(result, true)
+    assertTrue(result)
+    assertEquals(setOf("#channel-1"), chatState.getJoinedChannelsValue())
+    assertEquals("#channel-1", chatState.getCurrentChannelValue())
   }
 
-  @Ignore // Temporarily disabled due to Mockito final class issues
   @Test
   fun `when using upper case join command, command returns true`() {
     val channel = "channel-1"
@@ -86,10 +93,11 @@ class CommandProcessorTest() {
       viewModel = null
     )
 
-    assertEquals(result, true)
+    assertTrue(result)
+    assertEquals(setOf("#channel-1"), chatState.getJoinedChannelsValue())
+    assertEquals("#channel-1", chatState.getCurrentChannelValue())
   }
 
-  @Ignore // Temporarily disabled due to Mockito final class issues
   @Test
   fun `when unknown command lower case is given, command returns true but does not process special handling`() {
     val channel = "channel-1"
@@ -99,7 +107,9 @@ class CommandProcessorTest() {
       onSendMessage = { a, b, c -> { } }, viewModel = null
     )
 
-    assertEquals(result, true)
+    assertTrue(result)
+    assertTrue(chatState.getJoinedChannelsValue().isEmpty())
+    assertEquals(context.getString(com.bitchat.android.R.string.command_unknown, "/wtfjoin"), chatState.getMessagesValue().single().content)
   }
 
   @Test

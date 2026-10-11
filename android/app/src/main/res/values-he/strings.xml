@@ -3,9 +3,10 @@
     <!-- TODO: Hebrew translations -->
     <!-- Machine-translated (Claude) — pending native-speaker review -->
   <plurals name="location_notes_title">
-    <item quantity="one">#%1$s ± 1 • %2$d הערה</item>
-    <item quantity="other">#%1$s ± 1 • %2$d הערות</item>
-  </plurals>
+        <item quantity="one">#%1$s ± 1 • %2$d הערה</item>
+        <item quantity="two">#%1$s ± 1 • %2$d הערות</item>
+        <item quantity="other">#%1$s ± 1 • %2$d הערות</item>
+    </plurals>
   <string name="location_notes_description">הוסף הערות קצרות וקבועות למיקום זה כדי שמבקרים אחרים ימצאו אותן.</string>
   <string name="location_notes_relays_unavailable">ממסרי מיקום אינם זמינים; ההערות הושהו</string>
   <string name="location_notes_no_relays_title">אין ממסרי מיקום בקרבת מקום</string>
@@ -110,9 +111,10 @@
   <string name="notification_mesh_mention_title_plural">%1$d אזכורים בצ׳אט Mesh</string>
   <string name="notification_more_locations">ועוד %1$d מיקומים</string>
   <plurals name="notification_and_more">
-    <item quantity="one">ועוד %1$d</item>
-    <item quantity="other">ועוד %1$d</item>
-  </plurals>
+        <item quantity="one">ועוד %1$d</item>
+        <item quantity="two">ועוד %1$d</item>
+        <item quantity="other">ועוד %1$d</item>
+    </plurals>
   <string name="mesh_service_channel_name">שירות רקע של רשת Mesh</string>
   <string name="mesh_service_channel_desc">שומר על פעילות רשת ה-Mesh ברקע</string>
   <string name="cd_add_favorite">הוסף למועדפים</string>
@@ -385,9 +387,10 @@
   <string name="tor_not_available_in_this_build">Tor אינו זמין בגרסה זו</string>
 
   <plurals name="people_count">
-    <item quantity="one">איש אחד</item>
-    <item quantity="other">%1$d אנשים</item>
-  </plurals>
+        <item quantity="one">איש אחד</item>
+        <item quantity="two">%1$d אנשים</item>
+        <item quantity="other">%1$d אנשים</item>
+    </plurals>
     <string name="about_language">שפה</string>
     <string name="about_app_language">שפת האפליקציה</string>
     <string name="about_system_default">ברירת המחדל של המערכת</string>

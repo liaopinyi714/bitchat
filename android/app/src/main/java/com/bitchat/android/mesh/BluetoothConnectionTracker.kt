@@ -84,7 +84,9 @@ class BluetoothConnectionTracker(
     
     override fun disconnect(id: String) {
         connectedDevices[id]?.gatt?.let {
-            try { it.disconnect() } catch (_: Exception) { }
+            try { it.disconnect() } catch (_: SecurityException) {
+                Log.w(TAG, "Bluetooth permission revoked during disconnect")
+            } catch (_: RuntimeException) { }
         }
         cleanupDeviceConnection(id)
         Log.d(TAG, "Requested disconnect for $id")
@@ -193,9 +195,7 @@ class BluetoothConnectionTracker(
     /**
      * Add a subscribed device
      */
-    fun addSubscribedDevice(device: BluetoothDevice) {
-        subscribedDevices.add(device)
-    }
+    fun addSubscribedDevice(device: BluetoothDevice): Boolean = subscribedDevices.addIfAbsent(device)
     
     /**
      * Remove a subscribed device

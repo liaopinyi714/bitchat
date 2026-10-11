@@ -330,7 +330,7 @@
     </plurals>
 
     <plurals name="people_count">
-        <item quantity="one">۱ نفر</item>
+        <item quantity="one">%d نفر</item>
         <item quantity="other">%d نفر</item>
     </plurals>
 

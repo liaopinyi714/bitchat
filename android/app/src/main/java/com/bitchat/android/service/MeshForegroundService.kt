@@ -44,7 +44,13 @@ class MeshForegroundService : Service() {
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 if (shouldStartForeground) {
-                    context.startForegroundService(intent)
+                    try {
+                        context.startForegroundService(intent)
+                    } catch (_: android.app.ForegroundServiceStartNotAllowedException) {
+                        Log.w("MeshForegroundService", "System deferred background startup")
+                    } catch (_: SecurityException) {
+                        Log.w("MeshForegroundService", "Permission changed during background startup")
+                    }
                 } else {
                     android.util.Log.i(
                         "MeshForegroundService",
@@ -189,7 +195,7 @@ class MeshForegroundService : Service() {
                 if (MeshServicePreferences.isBackgroundEnabled(true) && hasAllRequiredPermissions() && !isInForeground) {
                     val count = getUnifiedActivePeerCount()
                     val n = buildNotification(count)
-                    startForegroundCompat(n)
+                    if (!startForegroundCompat(n)) return START_NOT_STICKY
                     isInForeground = true
                     lastNotifiedPeerCount = count
                 } else {
@@ -199,8 +205,12 @@ class MeshForegroundService : Service() {
             else -> { /* ACTION_START or null */ }
         }
 
-        // Ensure mesh is running (only after permissions are granted)
-        ensureMeshStarted()
+        // Permission can disappear after startForegroundService() but before this
+        // callback. Stop promptly instead of missing Android's promotion deadline.
+        if (!MeshServicePreferences.isBackgroundEnabled(true) || !hasAllRequiredPermissions()) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
 
         // Promote exactly once when eligible, otherwise stay background (or stop).
         // POST_NOTIFICATIONS is intentionally not an eligibility requirement: Android 13+
@@ -208,10 +218,13 @@ class MeshForegroundService : Service() {
         if (MeshServicePreferences.isBackgroundEnabled(true) && hasAllRequiredPermissions() && !isInForeground) {
             val count = getUnifiedActivePeerCount()
             val notification = buildNotification(count)
-            startForegroundCompat(notification)
+            if (!startForegroundCompat(notification)) return START_NOT_STICKY
             isInForeground = true
             lastNotifiedPeerCount = count
         }
+
+        // Promote before starting transports, whose initialization can be slow.
+        ensureMeshStarted()
 
         return START_STICKY
     }
@@ -241,7 +254,7 @@ class MeshForegroundService : Service() {
         val count = getUnifiedActivePeerCount()
         if (MeshServicePreferences.isBackgroundEnabled(true) && hasAllRequiredPermissions()) {
             if (lastNotifiedPeerCount != count) {
-                startForegroundCompat(buildNotification(count))
+                if (!startForegroundCompat(buildNotification(count))) return
                 lastNotifiedPeerCount = count
             }
         } else if (force) {
@@ -337,12 +350,17 @@ class MeshForegroundService : Service() {
         }
     }
 
-    private fun startForegroundCompat(notification: Notification) {
-        if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
+    private fun startForegroundCompat(notification: Notification): Boolean = try {
+        startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+        true
+    } catch (_: SecurityException) {
+        isInForeground = false
+        stopSelf()
+        false
+    } catch (_: android.app.ForegroundServiceStartNotAllowedException) {
+        isInForeground = false
+        stopSelf()
+        false
     }
 
     override fun onDestroy() {

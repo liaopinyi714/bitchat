@@ -4,11 +4,11 @@
 
 ## 当前版本与发布状态
 
-0.2.0（versionCode 8）开始使用独立的长期发行证书，手机最低 Android 14。安装包继续使用 R8 精简，提供 ARM64 和通用包；UI、频道协议、加密算法及 Worker 存储结构保持兼容。
+当前 0.2.1（versionCode 9）沿用 0.2.0 建立的长期发行证书，手机最低 Android 14。安装包继续使用 R8 精简，提供 ARM64 和通用包；UI、频道协议、加密算法及 Worker 存储结构保持兼容。
 
-当前按**发行候选版本**准备。自动构建、回归测试、签名与产物检查的具体结果见 [验证记录](TESTING.md)。真实手机持续运行、双机 BLE / Wi-Fi Aware、升级保留数据、后台与媒体验收尚未完成。首次上传应勾选 **Set as a pre-release**；完成 [使用前验收](OPERATIONS.md#使用前验收) 后，可将同一份候选发行转为正式 Release。不能仅根据 Gradle 成功就写成“长期稳定性已验证”。
+当前按**发行候选版本**准备。自动构建、回归测试、签名与产物检查的具体结果见 [验证记录](TESTING.md)。真实手机持续运行、双机 BLE / Wi-Fi Aware、升级保留数据、后台与媒体验收尚未完成。首次上传应勾选 **Set as a pre-release**；完成 [使用前验收](OPERATIONS.md#使用前验收) 后，可将同一份候选发行转为正式 Release。0.2.1 已启用严格 Lint、移除旧基线并修复已定位的运行与数量资源问题；不能把尚未执行的真机验收写成已通过。
 
-推荐 tag：`v0.2.0`；候选标题：`bitchat 0.2.0 — 发行候选`。若候选发现问题，增加 versionCode 并发布新版本，不覆盖已经公开的 APK。
+推荐 tag：`v0.2.1`；候选标题：`bitchat 0.2.1 — 稳定性修复`。若候选发现问题，增加 versionCode 并发布新版本，不覆盖已经公开的 APK。
 
 ## 发行文件
 
@@ -63,8 +63,8 @@ python3 tools/verify-apk.py --apk-dir android/app/build/outputs/apk/release --un
 普通 release 保持未签名。发行不要传入 `bitchat.previewSigning`。用实际文件路径替换占位符；输出必须是新目录：
 
 ```sh
-python3 tools/sign-release.py --input-dir android/app/build/outputs/apk/release --output-dir .build/signed-0.2.0 --keystore <仓库外的release.p12> --password-file <仓库外的password.txt>
-python3 tools/verify-apk.py --apk-dir .build/signed-0.2.0 --release
+python3 tools/sign-release.py --input-dir android/app/build/outputs/apk/release --output-dir .build/signed-0.2.1 --keystore <仓库外的release.p12> --password-file <仓库外的password.txt>
+python3 tools/verify-apk.py --apk-dir .build/signed-0.2.1 --release
 ```
 
 若保存了此前发布的通用 APK，为两条命令添加 `--baseline <旧通用APK>`，同时验证原生库、静态资产及签名升级关系。对比排除 `assets/dexopt/baseline.prof` 和 `baseline.profm`，它们随 DEX 变更重新生成。未来有意更新其他资产时，旧包字节对比会失败，维护者须审查变化并更新验收范围，不能忽略失败。
@@ -76,7 +76,7 @@ python3 tools/verify-apk.py --apk-dir .build/signed-0.2.0 --release
 将最终源码与文档提交后，可用以下命令生成四个发布附件。它要求 Git 工作区干净，读取当前提交作为 `sourceCommit`；因此必须先构建该提交对应的代码，再打包，不能拿其他提交的旧 APK 冒充。输出目录须不存在：
 
 ```sh
-python3 tools/package-release.py --signed-dir .build/signed-0.2.0 --output-dir .build/releases/v0.2.0
+python3 tools/package-release.py --signed-dir .build/signed-0.2.1 --output-dir .build/releases/v0.2.1
 ```
 
 `BUILDINFO.json` 记录声明的源码来源与工具链，不是独立可重现构建证明。`SHA256SUMS` 包含两个 APK 与构建信息文件的哈希，不对自身计算哈希。
@@ -84,8 +84,8 @@ python3 tools/package-release.py --signed-dir .build/signed-0.2.0 --output-dir .
 ## 手动上传到 GitHub
 
 1. 打开 [新建 Release 页面](https://github.com/liaopinyi714/bitchat/releases/new)，使用有仓库写权限的 GitHub 账号。
-2. 创建 tag `v0.2.0`，Target 选择本次检查后的精确提交。若 main 已有更新，采用 `BUILDINFO.json` 中的 `sourceCommit`，不要直接采用新的 main。
-3. 标题填写 `bitchat 0.2.0 — 发行候选`，粘贴 [0.2.0 发布说明](RELEASE_NOTES_0.2.0.md)，保留验证范围和待完成事项。
+2. 创建 tag `v0.2.1`，Target 选择本次检查后的精确提交。若 main 已有更新，采用 `BUILDINFO.json` 中的 `sourceCommit`，不要直接采用新的 main。
+3. 标题填写 `bitchat 0.2.1 — 稳定性修复`，粘贴 [0.2.1 发布说明](RELEASE_NOTES_0.2.1.md)，保留验证范围和待完成事项。
 4. 附件区上传 ARM64 APK、通用 APK、`SHA256SUMS`、`BUILDINFO.json` 四个文件。不要改动固定 APK 文件名或上传签名目录。
 5. 等待四个上传任务完成。勾选 **Set as a pre-release**，先 **Save draft**，复核版本、目标提交、文件名和说明。
 6. 确认后点 **Publish release**。发布后重新下载两个 APK，核对 SHA-256，并检查安装界面。

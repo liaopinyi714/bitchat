@@ -4,9 +4,11 @@
     <!-- Machine-translated (Claude) — pending native-speaker review -->
     
   <plurals name="location_notes_title">
-    <item quantity="one">#%1$s ± 1 • %2$d notatka</item>
-    <item quantity="other">#%1$s ± 1 • %2$d notatek</item>
-  </plurals>
+        <item quantity="one">#%1$s ± 1 • %2$d notatka</item>
+        <item quantity="few">#%1$s ± 1 • %2$d notatki</item>
+        <item quantity="many">#%1$s ± 1 • %2$d notatek</item>
+        <item quantity="other">#%1$s ± 1 • %2$d notatek</item>
+    </plurals>
   <string name="location_notes_description">dodaj krótkie stałe notatki do tej lokalizacji, aby inni odwiedzający mogli je znaleźć.</string>
   <string name="location_notes_relays_unavailable">przekaźniki geo niedostępne; notatki wstrzymane</string>
   <string name="location_notes_no_relays_title">brak przekaźników geo w pobliżu</string>

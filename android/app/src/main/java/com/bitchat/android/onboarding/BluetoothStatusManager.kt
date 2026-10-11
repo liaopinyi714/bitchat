@@ -178,14 +178,14 @@ class BluetoothStatusManager(
                 try {
                     // These calls require BLUETOOTH_CONNECT permission on Android 12+
                     appendLine("Adapter name: ${adapter.name ?: "Unknown"}")
-                    appendLine("Adapter address: ${adapter.address ?: "Unknown"}")
+                    appendLine("Adapter address: [Unavailable to non-system apps]")
+                    appendLine("Adapter state: ${getAdapterStateName(adapter.state)}")
                 } catch (securityException: SecurityException) {
                     // Permission not granted yet, skip detailed info
                     appendLine("Adapter details: [Permission required]")
                 } catch (e: Exception) {
                     appendLine("Adapter details: [Error: ${e.message}]")
                 }
-                appendLine("Adapter state: ${getAdapterStateName(adapter.state)}")
             }
         }
     }

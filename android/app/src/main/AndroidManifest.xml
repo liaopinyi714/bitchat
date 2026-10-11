@@ -48,10 +48,7 @@
     <!-- Camera for QR verification -->
     <uses-permission android:name="android.permission.CAMERA" />
 
-    <!-- Storage permissions for file sharing -->
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- Files/photos are selected through system pickers and per-URI grants. -->
 
     <!-- Haptic feedback permission -->
     <uses-permission android:name="android.permission.VIBRATE" />
