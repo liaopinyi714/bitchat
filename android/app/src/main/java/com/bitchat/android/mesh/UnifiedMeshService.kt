@@ -27,7 +27,8 @@ import kotlinx.coroutines.launch
  */
 class UnifiedMeshService(
     private val context: Context,
-    private val bluetooth: BluetoothMeshService
+    private val bluetooth: BluetoothMeshService,
+    onlineOverride: com.bitchat.android.cloudflare.CloudflareMeshService? = null
 ) : MeshService, BluetoothMeshDelegate {
 
     companion object {
@@ -37,7 +38,7 @@ class UnifiedMeshService(
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val powerManager = PowerManager.getInstance(context.applicationContext)
     private var announcementJob: Job? = null
-    private val online = com.bitchat.android.cloudflare.CloudflareMeshService(context, bluetooth.myPeerID) { routed ->
+    private val online = onlineOverride ?: com.bitchat.android.cloudflare.CloudflareMeshService(context, bluetooth.myPeerID) { routed ->
         if (isBleEnabled()) bluetooth.sendTopicPacket(routed)
         else wifiService()?.sendTopicPacket(routed) == true
     }
@@ -273,7 +274,10 @@ class UnifiedMeshService(
         val merged = linkedMapOf<String, String>()
         merged.putAll(online.getPeerNicknames())
         try { merged.putAll(wifiService()?.getPeerNicknames().orEmpty()) } catch (_: Exception) { }
-        try { merged.putAll(bluetooth.getPeerNicknames()) } catch (_: Exception) { }
+        try {
+            if (isBleEnabled()) merged.putAll(bluetooth.getPeerNicknames())
+            else bluetooth.getPeerNicknames().forEach { (peer, name) -> merged.putIfAbsent(peer, name) }
+        } catch (_: Exception) { }
         return merged
     }
 
@@ -293,7 +297,10 @@ class UnifiedMeshService(
     }
 
     override fun getSessionState(peerID: String): NoiseSession.NoiseSessionState {
-        val bleState = try { bluetooth.getSessionState(peerID) } catch (_: Exception) { NoiseSession.NoiseSessionState.Uninitialized }
+        val bleState = try {
+            if (isBleConnected(peerID)) bluetooth.getSessionState(peerID)
+            else NoiseSession.NoiseSessionState.Uninitialized
+        } catch (_: Exception) { NoiseSession.NoiseSessionState.Uninitialized }
         val wifiState = try { wifiService()?.getSessionState(peerID) } catch (_: Exception) { null }
         val onlineState = online.getSessionState(peerID)
         return when {
@@ -328,14 +335,16 @@ class UnifiedMeshService(
     override fun getPeerInfo(peerID: String): PeerInfo? {
         val ble = try { bluetooth.getPeerInfo(peerID) } catch (_: Exception) { null }
         val wifi = try { wifiService()?.getPeerInfo(peerID) } catch (_: Exception) { null }
-        val remote = online.getPeerInfo(peerID)
+        val remote = online.getPeerInfo(peerID)?.let {
+            it.copy(isConnected = online.isOnline(peerID), isDirectConnection = false)
+        }
         return when {
-            ble?.isConnected == true && hasEstablishedSessionOnBluetooth(peerID) -> ble
+            isBleConnected(peerID) && hasEstablishedSessionOnBluetooth(peerID) -> ble
             wifi?.isConnected == true && wifiService()?.hasEstablishedSession(peerID) == true -> wifi
-            ble?.isConnected == true -> ble
+            isBleConnected(peerID) -> ble
             wifi?.isConnected == true -> wifi
             remote?.isConnected == true -> remote
-            else -> ble ?: wifi ?: remote
+            else -> remote ?: wifi ?: ble?.copy(isConnected = false, isDirectConnection = false)
         }
     }
 
@@ -471,13 +480,14 @@ class UnifiedMeshService(
         val ids = linkedSetOf<String>()
         ids.addAll(online.getPeerNicknames().keys)
         try { ids.addAll(com.bitchat.android.services.AppStateStore.peers.value) } catch (_: Exception) { }
-        try { ids.addAll(bluetooth.getPeerNicknames().keys) } catch (_: Exception) { }
+        try { if (isBleEnabled()) ids.addAll(bluetooth.getPeerNicknames().keys) } catch (_: Exception) { }
         try { ids.addAll(wifiService()?.getPeerNicknames()?.keys.orEmpty()) } catch (_: Exception) { }
         return ids.toList()
     }
 
     private fun wifiService(): MeshService? {
         return try {
+            if (context.getSystemService(android.net.wifi.WifiManager::class.java)?.isWifiEnabled != true) return null
             WifiAwareController.getService()?.also { service ->
                 if (delegate != null && service.delegate !== this) {
                     service.delegate = this
@@ -489,15 +499,24 @@ class UnifiedMeshService(
     }
 
     private fun isBleEnabled(): Boolean {
-        return try {
+        val configured = try {
             com.bitchat.android.ui.debug.DebugSettingsManager.getInstance().bleEnabled.value
         } catch (_: Exception) {
             try { com.bitchat.android.ui.debug.DebugPreferenceManager.getBleEnabled(true) } catch (_: Exception) { true }
         }
+        if (!configured || !BluetoothPermissionManager(context).hasBluetoothPermissions()) return false
+        if (androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.BLUETOOTH_CONNECT
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED) return false
+        return try {
+            context.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter?.isEnabled == true
+        } catch (_: SecurityException) {
+            false
+        }
     }
 
     private fun isBleConnected(peerID: String): Boolean {
-        return try { bluetooth.getPeerInfo(peerID)?.isConnected == true } catch (_: Exception) { false }
+        return isBleEnabled() && try { bluetooth.getPeerInfo(peerID)?.isConnected == true } catch (_: Exception) { false }
     }
 
     private fun isWifiConnected(peerID: String): Boolean {
@@ -518,6 +537,6 @@ class UnifiedMeshService(
     }
 
     private fun hasEstablishedSessionOnBluetooth(peerID: String): Boolean {
-        return try { bluetooth.hasEstablishedSession(peerID) } catch (_: Exception) { false }
+        return isBleConnected(peerID) && try { bluetooth.hasEstablishedSession(peerID) } catch (_: Exception) { false }
     }
 }

@@ -94,11 +94,32 @@ class CloudflareMeshService(
             onVerifiedPublicPacket = ::cachePublicPacket,
             onRequestSync = ::receiveSync,
             onMessageReceived = ::admitMessage,
+            canAcknowledgePrivateDuplicate = { message ->
+                running && message.senderPeerID?.let(::isBlocked) != true &&
+                    com.bitchat.android.services.IncomingMessageAdmission.canAcknowledgePrivateDuplicate(message)
+            },
+            onPrivateDeliveryAcknowledged = { id, peer -> privateOutbox.acknowledge(id, peer) },
             announcementNicknameProvider = { com.bitchat.android.services.NicknameProvider.getNickname(context, myPeerID) }
         ),
         bridgeToOtherTransports = false,
         enablePeriodicGossip = false,
         directedAnnouncements = true
+    )
+
+    private val privateOutbox = PrivateRelayOutbox(
+        scope = scope,
+        canSend = { peer ->
+            val connected = running && mailbox.ready
+            val established = core.hasEstablishedSession(peer)
+            if (connected && !established) initiateNoiseHandshake(peer)
+            connected && established
+        },
+        send = core::sendPrivateMessage,
+        onExpired = { id ->
+            com.bitchat.android.services.AppStateStore.updatePrivateMessageStatus(
+                id, com.bitchat.android.model.DeliveryStatus.Failed("Delivery was not confirmed")
+            )
+        }
     )
 
     init {
@@ -150,6 +171,7 @@ class CloudflareMeshService(
     }
 
     private fun admitMessage(message: BitchatMessage): Boolean {
+        if (!running) return false
         if (message.channel != null && !TopicPayload.joinedTopics.contains(message.channel)) return false
         if (message.senderPeerID?.let(::isBlocked) == true) return false
         if (!com.bitchat.android.services.IncomingMessageAdmission.admitToAppState(message)) return false
@@ -251,6 +273,7 @@ class CloudflareMeshService(
     }
     override fun stopServices() {
         running = false; presenceJob?.cancel(); presenceJob = null
+        privateOutbox.clear()
         mailbox.stop()
         rooms.forEach { (channel, connection) -> connection.stop(); TopicRelayState.setStatus(channel, "disconnected") }
         core.stopCore(); core.clearAllInternalData(); links.clear(); peerTopics.clear()
@@ -258,7 +281,10 @@ class CloudflareMeshService(
         com.bitchat.android.services.AppStateStore.clearTransportDirectPeers(transport.id)
     }
     override fun sendMessage(content: String, mentions: List<String>, channel: String?) = core.sendMessage(content, mentions, channel)
-    override fun sendPrivateMessage(content: String, recipientPeerID: String, recipientNickname: String, messageID: String?) = core.sendPrivateMessage(content, recipientPeerID, recipientNickname, messageID)
+    override fun sendPrivateMessage(content: String, recipientPeerID: String, recipientNickname: String, messageID: String?) {
+        if (!running || content.isEmpty() || recipientPeerID.isEmpty()) return
+        privateOutbox.enqueue(content, recipientPeerID, recipientNickname, messageID ?: java.util.UUID.randomUUID().toString())
+    }
     override fun sendReadReceipt(messageID: String, recipientPeerID: String, readerNickname: String) = core.sendReadReceipt(messageID, recipientPeerID, readerNickname)
     override fun sendVerifyChallenge(peerID: String, noiseKeyHex: String, nonceA: ByteArray) = core.sendVerifyChallenge(peerID, noiseKeyHex, nonceA)
     override fun sendVerifyResponse(peerID: String, noiseKeyHex: String, nonceA: ByteArray) = core.sendVerifyResponse(peerID, noiseKeyHex, nonceA)

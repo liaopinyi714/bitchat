@@ -73,6 +73,51 @@ class MessageHandlerTest {
         MeshGraphService.resetForTesting()
     }
 
+    private fun privateTextPacket(): BitchatPacket {
+        val plaintext = NoisePayload(
+            NoisePayloadType.PRIVATE_MESSAGE,
+            requireNotNull(com.bitchat.android.model.PrivateMessagePacket("synthetic-message", "hello").encode())
+        ).encode()
+        whenever(delegate.decryptFromPeer(any(), eq(peerID))).thenReturn(
+            NoiseDecryptionResult(plaintext, authenticatedSession)
+        )
+        whenever(delegate.encryptForPeer(any(), eq(peerID))).thenReturn(byteArrayOf(0x55))
+        return encryptedPacket()
+    }
+
+    @Test
+    fun `rejected private text never sends a delivered receipt`() = runBlocking {
+        val packet = privateTextPacket()
+        whenever(delegate.onMessageReceived(any())).thenReturn(false)
+
+        assertFalse(handler.handleNoiseEncrypted(RoutedPacket(packet, peerID, "online-mailbox")))
+        verify(delegate).onMessageReceived(any())
+        verify(delegate, never()).encryptForPeer(any(), any())
+        verify(delegate, never()).sendPacket(any())
+    }
+
+    @Test
+    fun `accepted private text sends a delivered receipt after admission`() = runBlocking {
+        val packet = privateTextPacket()
+        whenever(delegate.onMessageReceived(any())).thenReturn(true)
+
+        assertTrue(handler.handleNoiseEncrypted(RoutedPacket(packet, peerID, "online-mailbox")))
+        val order = org.mockito.kotlin.inOrder(delegate)
+        order.verify(delegate).onMessageReceived(any())
+        order.verify(delegate).encryptForPeer(any(), eq(peerID))
+        order.verify(delegate).sendPacket(any())
+    }
+
+    @Test
+    fun `durable duplicate repeats its receipt without admitting it again`() = runBlocking {
+        val packet = privateTextPacket()
+        whenever(delegate.onMessageReceived(any())).thenReturn(false)
+        whenever(delegate.canAcknowledgePrivateDuplicate(any())).thenReturn(true)
+
+        assertTrue(handler.handleNoiseEncrypted(RoutedPacket(packet, peerID, "online-mailbox")))
+        verify(delegate).sendPacket(any())
+    }
+
     @Test
     fun `handleAnnounce accepts announce within clock skew tolerance for identity binding`() {
         runBlocking {

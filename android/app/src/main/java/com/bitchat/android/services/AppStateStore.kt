@@ -367,6 +367,18 @@ object AppStateStore {
         return true
     }
 
+    /** A repeated ciphertext can be acknowledged without publishing it or changing unread state. */
+    internal suspend fun hasDurablePrivateDuplicate(message: BitchatMessage): Boolean {
+        val (repository, generation) = synchronized(this) {
+            if (privateConversationWritesSuspended || !message.isPrivate) return false
+            (conversationRepository ?: return false) to privateConversationGeneration
+        }
+        if (!repository.containsPrivateMessageAndWait(message)) return false
+        return synchronized(this) {
+            !privateConversationWritesSuspended && generation == privateConversationGeneration
+        }
+    }
+
     private fun privateMessagePersistence(
         peerID: String,
         msg: BitchatMessage,

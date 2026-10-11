@@ -151,6 +151,15 @@ class ConversationRepository internal constructor(
         upsertMessageLocked(conversationID, aliases, displayName, message, isRead)
     }
 
+    internal suspend fun containsPrivateMessageAndWait(message: BitchatMessage): Boolean =
+        withContext(dispatcher) {
+            try {
+                database.containsPrivateMessage(message)
+            } catch (_: Exception) {
+                false
+            }
+        }
+
     private fun upsertMessageLocked(
         conversationID: String,
         aliases: Set<String>,
@@ -855,6 +864,17 @@ internal class ConversationDatabase(
             inserted = messageInserted,
             orphanedMediaPaths = orphanedMediaPaths
         )
+    }
+
+    fun containsPrivateMessage(message: BitchatMessage): Boolean = readableDatabase.rawQuery(
+        "SELECT ${MESSAGE_COLUMNS.joinToString(",")} FROM private_messages WHERE message_id = ?",
+        arrayOf(message.id)
+    ).use { cursor ->
+        if (!cursor.moveToFirst()) return@use false
+        val stored = cursor.toMessage()
+        stored.isPrivate && message.isPrivate &&
+            stored.senderPeerID == message.senderPeerID &&
+            stored.content == message.content && stored.type == message.type
     }
 
     fun updateDeliveryStatus(messageID: String, status: DeliveryStatus) {

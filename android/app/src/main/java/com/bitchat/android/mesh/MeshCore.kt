@@ -50,6 +50,8 @@ class MeshCore(
          * Return false to suppress all downstream effects for a rejected message.
          */
         val onMessageReceived: ((BitchatMessage) -> Boolean)? = null,
+        val canAcknowledgePrivateDuplicate: ((BitchatMessage) -> Boolean)? = null,
+        val onPrivateDeliveryAcknowledged: ((String, String) -> Unit)? = null,
         val onAnnounceProcessed: ((RoutedPacket, Boolean) -> Unit)? = null,
         val onVerifiedPublicPacket: ((BitchatPacket) -> Unit)? = null,
         val onRequestSync: ((RoutedPacket) -> Unit)? = null,
@@ -407,10 +409,13 @@ class MeshCore(
                 return delegate?.decryptChannelMessage(encryptedContent, channel)
             }
 
-            override fun onMessageReceived(message: BitchatMessage) {
-                if (hooks.onMessageReceived?.invoke(message) == false) return
+            override fun onMessageReceived(message: BitchatMessage): Boolean {
+                if (hooks.onMessageReceived?.invoke(message) == false) return false
                 delegate?.didReceiveMessage(message)
+                return true
             }
+            override fun canAcknowledgePrivateDuplicate(message: BitchatMessage): Boolean =
+                hooks.canAcknowledgePrivateDuplicate?.invoke(message) == true
             override fun onVerifiedPublicPacket(packet: BitchatPacket) {
                 hooks.onVerifiedPublicPacket?.invoke(packet)
             }
@@ -420,6 +425,7 @@ class MeshCore(
             }
 
             override fun onDeliveryAckReceived(messageID: String, peerID: String) {
+                hooks.onPrivateDeliveryAcknowledged?.invoke(messageID, peerID)
                 try {
                     com.bitchat.android.services.AppStateStore.updatePrivateMessageStatus(
                         messageID,
@@ -430,6 +436,7 @@ class MeshCore(
             }
 
             override fun onReadReceiptReceived(messageID: String, peerID: String) {
+                hooks.onPrivateDeliveryAcknowledged?.invoke(messageID, peerID)
                 try {
                     com.bitchat.android.services.AppStateStore.updatePrivateMessageStatus(
                         messageID,

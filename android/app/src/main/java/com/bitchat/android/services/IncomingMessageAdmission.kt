@@ -11,6 +11,12 @@ import kotlinx.coroutines.runBlocking
  * Public and channel messages retain their existing best-effort behavior if state reflection fails.
  */
 internal object IncomingMessageAdmission {
+    fun canAcknowledgePrivateDuplicate(message: BitchatMessage): Boolean = try {
+        runBlocking { AppStateStore.hasDurablePrivateDuplicate(message) }
+    } catch (_: Exception) {
+        false
+    }
+
     fun admitToAppState(message: BitchatMessage): Boolean = try {
         when {
             message.isPrivate -> {

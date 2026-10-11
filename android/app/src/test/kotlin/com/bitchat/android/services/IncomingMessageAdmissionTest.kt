@@ -74,6 +74,9 @@ class IncomingMessageAdmissionTest {
 
         assertTrue(IncomingMessageAdmission.admitToAppState(message))
         assertFalse(IncomingMessageAdmission.admitToAppState(message))
+        assertTrue(IncomingMessageAdmission.canAcknowledgePrivateDuplicate(message))
+        assertFalse(IncomingMessageAdmission.canAcknowledgePrivateDuplicate(message.copy(content = "changed")))
+        assertFalse(IncomingMessageAdmission.canAcknowledgePrivateDuplicate(message.copy(senderPeerID = "other-peer")))
     }
 
     @Test

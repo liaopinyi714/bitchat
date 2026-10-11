@@ -115,10 +115,12 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                             mentions = null
                         )
                         
-                        // Notify delegate
-                        delegate?.onMessageReceived(message)
-                        
-                        // Send delivery ACK exactly like iOS
+                        // A decrypted packet is not delivery. Persist before acknowledging;
+                        // a retry of an already stored message only needs its receipt repeated.
+                        val accepted = delegate?.onMessageReceived(message) == true
+                        if (!accepted && delegate?.canAcknowledgePrivateDuplicate(message) != true) {
+                            return false
+                        }
                         sendDeliveryAck(privateMessage.messageID, peerID)
                     }
                 }
@@ -142,9 +144,9 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                             senderPeerID = peerID
                         )
 
-                        if (!LiveVoiceManager.getInstance(appContext).absorbFinalizedVoiceNote(message)) {
-                            delegate?.onMessageReceived(message)
-                        }
+                        val accepted = LiveVoiceManager.getInstance(appContext).absorbFinalizedVoiceNote(message) ||
+                            delegate?.onMessageReceived(message) == true
+                        if (!accepted) return false
 
                         // Send delivery ACK with generated message ID
                         sendDeliveryAck(uniqueMsgId, peerID)
@@ -754,7 +756,9 @@ interface MessageHandlerDelegate {
     fun decryptChannelMessage(encryptedContent: ByteArray, channel: String): String?
 
     // Callbacks
-    fun onMessageReceived(message: BitchatMessage)
+    /** True only after the message has been admitted to the recipient's durable state. */
+    fun onMessageReceived(message: BitchatMessage): Boolean
+    fun canAcknowledgePrivateDuplicate(message: BitchatMessage): Boolean = false
     fun onVerifiedPublicPacket(packet: BitchatPacket) {}
     fun onChannelLeave(channel: String, fromPeer: String)
     fun onDeliveryAckReceived(messageID: String, peerID: String)

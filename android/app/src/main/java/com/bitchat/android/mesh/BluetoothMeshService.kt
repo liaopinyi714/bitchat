@@ -484,13 +484,13 @@ class BluetoothMeshService(private val context: Context) : TransportBridgeServic
             }
             
             // Callbacks
-            override fun onMessageReceived(message: BitchatMessage) {
+            override fun onMessageReceived(message: BitchatMessage): Boolean {
                 // Private-message admission is authoritative. In particular, do not forward a
                 // callback or notify after panic mode rejected the message while wiping state.
                 if (
                     !com.bitchat.android.services.IncomingMessageAdmission
                         .admitToAppState(message)
-                ) return
+                ) return false
 
                 // And forward to UI delegate if attached
                 delegate?.didReceiveMessage(message)
@@ -507,6 +507,7 @@ class BluetoothMeshService(private val context: Context) : TransportBridgeServic
                         }
                     } catch (_: Exception) { }
                 }
+                return true
             }
             
             override fun onChannelLeave(channel: String, fromPeer: String) {
