@@ -62,4 +62,15 @@ class UnifiedPrivateRoutingTest {
         org.junit.Assert.assertFalse(requireNotNull(service.getPeerInfo(peer)).isConnected)
         org.junit.Assert.assertFalse(service.hasEstablishedSession(peer))
     }
+
+    @Test fun `mailbox reconnect retains a new private message instead of dropping it into disabled radios`() {
+        whenever(adapter.isEnabled).thenReturn(false)
+        whenever(online.isOnline(peer)).thenReturn(false)
+        whenever(online.canQueuePrivateMessage(peer)).thenReturn(true)
+
+        service.sendPrivateMessage("synthetic text", peer, "name", "message-1")
+
+        verify(online).sendPrivateMessage("synthetic text", peer, "name", "message-1")
+        verify(bluetooth, never()).sendPrivateMessage(any(), any(), any(), anyOrNull())
+    }
 }

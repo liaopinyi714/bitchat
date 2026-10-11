@@ -14,6 +14,8 @@ import subprocess
 import sys
 import tempfile
 
+from release_output import atomic_output_directory
+
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("apk_checks", ROOT / "tools/verify-apk.py")
 checks = importlib.util.module_from_spec(spec)
@@ -32,32 +34,34 @@ def main():
     checks.require(args.keystore.is_file() and args.password_file.is_file(), "Local signing files unavailable")
     checks.require(not args.output_dir.exists(), "Choose a new output directory; existing artifacts are never overwritten")
     # Validate the entire unsigned input before asking the key to sign anything.
-    checks.run_tool([sys.executable, str(ROOT / "tools/verify-apk.py"), "--apk-dir",
-                     str(args.input_dir), "--unsigned"])
-    args.output_dir.mkdir(parents=True)
-    # Keep temporary public lineage data inside the explicitly selected output root.
-    # This also works on restricted hosts where the system temp directory is unavailable.
-    with tempfile.TemporaryDirectory(prefix="bitchat-sign-", dir=args.output_dir.resolve()) as temporary:
-        checks.require(Path(temporary).resolve().parent == args.output_dir.resolve(), "Invalid temporary signing directory")
-        lineage = Path(temporary) / "lineage.bin"
-        lineage.write_bytes(base64.b64decode((ROOT / "release/signing-lineage.base64").read_text().strip(), validate=True))
-        for abi in ["universal", *sorted(checks.ABIS)]:
-            source = args.input_dir / f"app-{abi}-release-unsigned.apk"
-            target = args.output_dir / f"app-{abi}-release.apk"
-            checks.run_tool([
-                checks.sdk_tool("apksigner"), "sign", "--ks", str(args.keystore),
-                "--ks-key-alias", args.alias, "--ks-pass", "file:" + str(args.password_file),
-                "--lineage", str(lineage), "--rotation-min-sdk-version", "28",
-                "--min-sdk-version", "34", "--v1-signing-enabled", "false",
-                "--v2-signing-enabled", "false", "--v3-signing-enabled", "true",
-                "--v4-signing-enabled", "false", "--debuggable-apk-permitted", "false",
-                "--out", str(target), str(source),
-            ])
-        verify = [sys.executable, str(ROOT / "tools/verify-apk.py"), "--apk-dir", str(args.output_dir), "--release"]
-        if args.baseline:
-            verify += ["--baseline", str(args.baseline)]
-        result = subprocess.run(verify, check=False)
-        checks.require(result.returncode == 0, "Signed artifacts did not pass release verification")
+    unsigned = [sys.executable, str(ROOT / "tools/verify-apk.py"), "--apk-dir", str(args.input_dir), "--unsigned"]
+    if args.baseline:
+        unsigned += ["--baseline", str(args.baseline)]
+    checks.run_tool(unsigned)
+    # Failed signing/verification never exposes a complete-looking final directory.
+    # Staging is a sibling so publication is an atomic rename on the same volume.
+    with atomic_output_directory(args.output_dir) as staging:
+        with tempfile.TemporaryDirectory(prefix="bitchat-sign-", dir=staging) as temporary:
+            checks.require(Path(temporary).resolve().parent == staging.resolve(), "Invalid temporary signing directory")
+            lineage = Path(temporary) / "lineage.bin"
+            lineage.write_bytes(base64.b64decode((ROOT / "release/signing-lineage.base64").read_text().strip(), validate=True))
+            for abi in ["universal", *sorted(checks.ABIS)]:
+                source = args.input_dir / f"app-{abi}-release-unsigned.apk"
+                target = staging / f"app-{abi}-release.apk"
+                checks.run_tool([
+                    checks.sdk_tool("apksigner"), "sign", "--ks", str(args.keystore),
+                    "--ks-key-alias", args.alias, "--ks-pass", "file:" + str(args.password_file),
+                    "--lineage", str(lineage), "--rotation-min-sdk-version", "28",
+                    "--min-sdk-version", "34", "--v1-signing-enabled", "false",
+                    "--v2-signing-enabled", "false", "--v3-signing-enabled", "true",
+                    "--v4-signing-enabled", "false", "--debuggable-apk-permitted", "false",
+                    "--out", str(target), str(source),
+                ])
+            verify = [sys.executable, str(ROOT / "tools/verify-apk.py"), "--apk-dir", str(staging), "--release"]
+            if args.baseline:
+                verify += ["--baseline", str(args.baseline)]
+            result = subprocess.run(verify, check=False)
+            checks.require(result.returncode == 0, "Signed artifacts did not pass release verification")
     print("Release APKs signed and verified. Keep the keystore and password outside the repository.")
 
 

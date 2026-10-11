@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.bitchat.android.features.media.ImageUtils
+import com.bitchat.android.features.media.ImagePreparation
 import com.bitchat.android.ui.ComposerActionSurface
 import com.bitchat.android.ui.ComposerIconSize
 import java.io.File
@@ -31,17 +32,20 @@ import java.io.File
 @Composable
 fun ImagePickerButton(
     modifier: Modifier = Modifier,
-    onImageReady: (String) -> Unit
+    onImagePreparationStarted: () -> (String) -> Unit
 ) {
     val context = LocalContext.current
+    val preparationScope = rememberCoroutineScope()
+    val captureReceiver by rememberUpdatedState(onImagePreparationStarted)
     var capturedImagePath by remember { mutableStateOf<String?>(null) }
     
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: android.net.Uri? ->
         if (uri != null) {
-            val outPath = ImageUtils.downscaleAndSaveToAppFiles(context, uri)
-            if (!outPath.isNullOrBlank()) onImageReady(outPath)
+            ImagePreparation.start(preparationScope, imageDecodeDispatcher, captureReceiver = captureReceiver) {
+                ImageUtils.downscaleAndSaveToAppFiles(context, uri)
+            }
         }
     }
     
@@ -50,12 +54,9 @@ fun ImagePickerButton(
     ) { success ->
         val path = capturedImagePath
         if (success && !path.isNullOrBlank()) {
-            // Downscale + correct orientation, then send; delete original
-            val outPath = com.bitchat.android.features.media.ImageUtils.downscalePathAndSaveToAppFiles(context, path)
-            if (!outPath.isNullOrBlank()) {
-                onImageReady(outPath)
+            ImagePreparation.start(preparationScope, imageDecodeDispatcher, File(path), captureReceiver) {
+                ImageUtils.downscalePathAndSaveToAppFiles(context, path)
             }
-            runCatching { File(path).delete() }
         } else {
             // Cleanup on cancel/failure
             path?.let { runCatching { File(it).delete() } }

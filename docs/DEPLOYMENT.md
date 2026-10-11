@@ -1,5 +1,7 @@
 # Cloudflare 部署
 
+0.2.4 包含 Worker 连接状态修复。已有项目重新部署最新代码即可，保留 `ROOMS` / `MAILBOXES` 绑定、域名及现有迁移标签，无需删除或重建 Durable Objects。只安装新 APK 不会更新服务器；修复范围见 [整体优化说明](OPTIMIZATION.md)。
+
 ## 从 GitHub 导入
 
 1. 登录 Cloudflare，确认 `123456714.xyz` 已在同一账号中生效。

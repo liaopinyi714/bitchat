@@ -24,13 +24,16 @@ class RelayConnection(
     private val client: OkHttpClient,
     private val crypto: EncryptionService,
     private val peerID: String,
-    private val onPacket: (BitchatPacket, String, String) -> Unit,
+    private val onPacket: (BitchatPacket, String, String) -> Boolean,
     private val onReady: () -> Unit,
     private val onStatus: (String) -> Unit,
     private val onProtection: ((String?, String?) -> String?)? = null,
     private val onPeerLeft: (String) -> Unit = {},
     private val onProtected: (String) -> Unit = {}
 ) {
+    // Receive callbacks can write to another room or mailbox. Keep outbound queue accounting
+    // independent of the receive monitor so simultaneous room callbacks cannot lock each other.
+    private val writeLock = Any()
     private val running = AtomicBoolean(false)
     @Volatile private var socket: WebSocket? = null
     @Volatile var ready: Boolean = false
@@ -40,7 +43,9 @@ class RelayConnection(
     private var attempts = 0
     @Volatile private var generation = 0L
 
-    @Synchronized fun start() { if (running.compareAndSet(false, true)) connect() }
+    @Synchronized fun start() {
+        if (running.compareAndSet(false, true)) { attempts = 0; connect() }
+    }
     @Synchronized fun stop() {
         running.set(false); generation++; retry?.cancel(); retry = null
         authenticationTimeout?.cancel(); authenticationTimeout = null
@@ -102,7 +107,13 @@ class RelayConnection(
                                 require(id.isNotEmpty() || packet.type == 1.toUByte())
                                 val sender = frame.getString("peer")
                                 require(sender.matches(Regex("[a-f0-9]{16}")) && TopicPayload.hex(packet.senderID) == sender)
-                                onPacket(packet, sender, "$kind:$scopeId:$current")
+                                if (!onPacket(packet, sender, "$kind:$scopeId:$current")) {
+                                    // Temporary receive overload must not delete a queued mailbox
+                                    // envelope. Reconnect with backoff so the relay can replay it.
+                                    webSocket.cancel()
+                                    reconnect(current)
+                                    return
+                                }
                                 // Relay acknowledgement means received by this client transport;
                                 // UI delivery still requires the original encrypted mesh receipt.
                                 if (kind == "mail" && id.isNotEmpty()) webSocket.send(JSONObject().put("type", "received").put("id", id).toString())
@@ -168,9 +179,8 @@ class RelayConnection(
         }
     }
 
-    @Synchronized fun send(packet: BitchatPacket, target: String? = null, historical: Boolean = false): Boolean {
-        val webSocket = socket ?: return false
-        if (!ready || webSocket.queueSize() > 1_048_576) return false
+    fun send(packet: BitchatPacket, target: String? = null, historical: Boolean = false): Boolean {
+        if (!ready) return false
         val bytes = packet.toBinaryData(padding = false) ?: return false
         if (bytes.size > 65_536) return false
         val id = TopicPayload.hex(MessageDigest.getInstance("SHA-256").digest(bytes))
@@ -178,8 +188,14 @@ class RelayConnection(
             .put("packet", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
         if (target != null) frame.put("target", target)
         if (historical) frame.put("historical", true)
-        return webSocket.send(frame.toString())
+        return write(frame.toString())
     }
 
-    @Synchronized fun protect(commitment: String): Boolean = ready && socket?.send(JSONObject().put("type", "protect").put("commitment", commitment).toString()) == true
+    fun protect(commitment: String): Boolean = write(JSONObject().put("type", "protect").put("commitment", commitment).toString())
+
+    private fun write(text: String): Boolean = synchronized(writeLock) {
+        val webSocket = socket ?: return false
+        if (!running.get() || !ready || webSocket.queueSize() + text.toByteArray(Charsets.UTF_8).size > 1_048_576) return false
+        webSocket.send(text)
+    }
 }

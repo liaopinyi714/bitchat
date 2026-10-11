@@ -31,7 +31,9 @@ export function decodePacket(value: unknown, maxBytes: number): Uint8Array {
 }
 
 export function parseFrame(raw: string, maxBytes: number): Record<string, unknown> {
-  if (encoder.encode(raw).length > maxBytes) throw new ProtocolError("frame_size");
+  // UTF-8 cannot be shorter than the UTF-16 code-unit count. Reject grossly
+  // oversized frames before allocating another buffer for their encoded bytes.
+  if (raw.length > maxBytes || encoder.encode(raw).length > maxBytes) throw new ProtocolError("frame_size");
   let value: unknown;
   try { value = JSON.parse(raw); } catch { throw new ProtocolError("invalid_json"); }
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new ProtocolError("invalid_frame");

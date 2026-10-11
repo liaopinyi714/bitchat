@@ -2,6 +2,8 @@ package com.bitchat.android.cloudflare
 
 import android.app.Application
 import com.bitchat.android.crypto.EncryptionService
+import com.bitchat.android.protocol.BitchatPacket
+import com.bitchat.android.protocol.MessageType
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -17,6 +19,10 @@ import org.junit.runner.RunWith
 import org.mockito.kotlin.*
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.Base64
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -28,6 +34,7 @@ class RelayConnectionTest {
     private val sessions = mutableListOf<Pair<WebSocket, WebSocketListener>>()
     private val statuses = mutableListOf<String>()
     private var readyCount = 0
+    private var readyAction: () -> Unit = {}
     private val connection: RelayConnection
 
     init {
@@ -42,7 +49,7 @@ class RelayConnectionTest {
             socket
         }
         connection = RelayConnection("wss://relay.test", "room", "a".repeat(64), scope, client,
-            crypto, "0".repeat(16), { _, _, _ -> }, { readyCount++ }, statuses::add)
+            crypto, "0".repeat(16), { _, _, _ -> true }, { readyCount++; readyAction() }, statuses::add)
     }
 
     @After fun cleanup() = connection.stop()
@@ -155,5 +162,79 @@ class RelayConnectionTest {
 
         verify(socket, never()).send(any<String>())
         assertFalse(connection.ready)
+    }
+
+    @Test fun `simultaneous room ready callbacks can write to each other without deadlock`() {
+        val bothReady = CountDownLatch(2)
+        val executor = Executors.newFixedThreadPool(4) { task -> Thread(task).apply { isDaemon = true } }
+        val other = RelayConnection("wss://relay.test", "room", "a".repeat(64), scope, client,
+            crypto, "0".repeat(16), { _, _, _ -> true }, {
+                bothReady.countDown()
+                check(bothReady.await(5, TimeUnit.SECONDS))
+                check(executor.submit<Boolean> { connection.protect("1".repeat(64)) }.get(5, TimeUnit.SECONDS))
+            }, {})
+        readyAction = {
+            bothReady.countDown()
+            check(bothReady.await(5, TimeUnit.SECONDS))
+            check(executor.submit<Boolean> { other.protect("1".repeat(64)) }.get(5, TimeUnit.SECONDS))
+        }
+        try {
+            connection.start()
+            other.start()
+            receive(message("challenge"), 0)
+            receive(message("challenge"), 1)
+            val first = executor.submit { receive(message("ready"), 0) }
+            val second = executor.submit { receive(message("ready"), 1) }
+            first.get(10, TimeUnit.SECONDS)
+            second.get(10, TimeUnit.SECONDS)
+            assertTrue(connection.ready)
+            assertTrue(other.ready)
+        } finally {
+            executor.shutdownNow()
+            // Neither callback takes another connection's receive monitor.
+            other.stop()
+        }
+    }
+
+    @Test fun `control writes respect the same bounded socket queue as packets`() {
+        connection.start()
+        receive(message("challenge"))
+        receive(message("ready"))
+        val socket = sessions.single().first
+        clearInvocations(socket)
+        whenever(socket.queueSize()).thenReturn(1_048_575)
+
+        assertFalse(connection.protect("1".repeat(64)))
+        verify(socket, never()).send(any<String>())
+    }
+
+    @Test fun `mailbox acknowledges admitted packets but retains overloaded packets for reconnect`() {
+        var accepted = true
+        val mail = RelayConnection("wss://relay.test", "mail", "0".repeat(16), scope, client,
+            crypto, "0".repeat(16), { _, _, _ -> accepted }, {}, {})
+        try {
+            mail.start()
+            val (socket, listener) = sessions.last()
+            listener.onMessage(socket, JSONObject(message("challenge"))
+                .put("kind", "mail").put("scope", "0".repeat(16)).toString())
+            listener.onMessage(socket, "{\"type\":\"ready\",\"protocol\":1}")
+            val packet = BitchatPacket(version = 1u, type = MessageType.ANNOUNCE.value,
+                senderID = ByteArray(8) { 1 }, recipientID = null, timestamp = 1uL,
+                payload = byteArrayOf(1), ttl = 7u)
+            val bytes = requireNotNull(packet.toBinaryData(padding = false))
+            val frame = JSONObject().put("type", "packet").put("peer", "01".repeat(8))
+                .put("id", TopicPayload.hex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes)))
+                .put("packet", Base64.getEncoder().encodeToString(bytes)).toString()
+
+            listener.onMessage(socket, frame)
+            accepted = false
+            listener.onMessage(socket, frame)
+
+            val writes = argumentCaptor<String>()
+            verify(socket, atLeastOnce()).send(writes.capture())
+            assertEquals(1, writes.allValues.count { JSONObject(it).optString("type") == "received" })
+            assertFalse(mail.ready)
+            verify(socket).cancel()
+        } finally { mail.stop() }
     }
 }

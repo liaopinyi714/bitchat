@@ -53,6 +53,7 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
      * packet as not liveness-proving (no lastSeen refresh, no relay).
      */
     suspend fun handleNoiseEncrypted(routed: RoutedPacket): Boolean {
+        if (packetProcessor?.isAcceptingPackets() == false) return false
         val packet = routed.packet
         val peerID = routed.peerID ?: "unknown"
 
@@ -68,6 +69,7 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
         try {
             // Decrypt the message using the Noise service
             val decryption = delegate?.decryptFromPeer(packet.payload, peerID)
+            if (packetProcessor?.isAcceptingPackets() == false) return false
             if (decryption == null) {
                 Log.w(TAG, "Failed to decrypt Noise message from $peerID - may need handshake")
                 registerDecryptFailure(peerID)
@@ -278,6 +280,7 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
     }
 
     suspend fun handleAnnounceWithResult(routed: RoutedPacket): AnnounceHandlingResult {
+        if (packetProcessor?.isAcceptingPackets() == false) return AnnounceHandlingResult.Rejected
         val packet = routed.packet
         val peerID = routed.peerID ?: "unknown"
 
@@ -295,6 +298,7 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
         val announcement = AnnouncementIdentityValidator.verify(packet, peerID) { signature, data, key ->
             delegate?.verifyEd25519Signature(signature, data, key) ?: false
         }
+        if (packetProcessor?.isAcceptingPackets() == false) return AnnounceHandlingResult.Rejected
         if (announcement == null) {
             Log.w(TAG, "Rejecting malformed, unbound, or invalidly signed ANNOUNCE from ${peerID.take(8)}")
             return AnnounceHandlingResult.Rejected

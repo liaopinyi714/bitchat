@@ -24,14 +24,20 @@ class CloudflareMeshService(
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     private val client: OkHttpClient = OkHttpClient.Builder().pingInterval(30, TimeUnit.SECONDS).build(),
     private val crypto: EncryptionService = EncryptionService(context.applicationContext),
+    presenceClock: () -> Long = { android.os.SystemClock.elapsedRealtime() },
     private val mirrorTopic: (RoutedPacket) -> Boolean
 ) : MeshService {
     private val dataManager = com.bitchat.android.ui.DataManager(context.applicationContext)
     private val rooms = ConcurrentHashMap<String, RelayConnection>()
     private val links = ConcurrentHashMap<String, String>()
     private val histories = ConcurrentHashMap<String, GossipSyncManager>()
-    private val peerTopics = ConcurrentHashMap<String, MutableSet<String>>()
+    private val peerPresence = RelayPeerPresence(presenceClock)
+    // Routing knowledge is not online presence. Keep private targets reachable after their
+    // stale Noise/session state expires; panic clearing explicitly discards this runtime cache.
+    private val privateTargets = ConcurrentHashMap.newKeySet<String>()
     @Volatile private var running = false
+    private val transportWriteLock = Any()
+    private var transportGeneration = 0L
     private var presenceJob: Job? = null
     private val notificationManager = com.bitchat.android.ui.NotificationManager(context.applicationContext,
         androidx.core.app.NotificationManagerCompat.from(context.applicationContext))
@@ -41,7 +47,10 @@ class CloudflareMeshService(
     private val transport: MeshTransport = object : MeshTransport {
         override val id = "cloudflare"
         override fun broadcastPacket(routed: RoutedPacket): Boolean {
-            if (!running) return false
+            val generation = synchronized(transportWriteLock) {
+                if (!running) return false
+                transportGeneration
+            }
             val packet = routed.packet
             // Relay traffic from another sender never escapes its original channel or transport.
             if (TopicPayload.hex(packet.senderID) != myPeerID) return false
@@ -53,7 +62,9 @@ class CloudflareMeshService(
                 val connection = rooms[channel]
                 val mirror = if (connection?.ready == true) routed.copy(reportTransferProgress = false) else routed
                 val local = if (packet.type == MessageType.REQUEST_SYNC.value) false else mirrorTopic(mirror)
-                val online = if (connection?.ready == true) sender.send(routed, "topic") { connection.send(it.packet) } else false
+                val online = if (connection?.ready == true) sender.send(routed, "topic") { fragment ->
+                    sendIfCurrent(generation) { connection.send(fragment.packet) }
+                } else false
                 if (!online) TopicRelayState.setStatus(channel, "offline")
                 return local || online
             }
@@ -61,13 +72,13 @@ class CloudflareMeshService(
             var accepted = false
             rooms.forEach { (name, connection) ->
                 histories[name]?.onPublicPacketSeen(packet)
-                if (connection.send(packet)) accepted = true
+                if (sendIfCurrent(generation) { connection.send(packet) }) accepted = true
             }
             if (packet.type == MessageType.ANNOUNCE.value) {
                 // A private peer need not share a room. Send the same signed identity update
                 // through its mailbox, without publishing it to unrelated channels.
                 core.getPeerNicknames().keys.forEach { peer ->
-                    val sharesReadyRoom = peerTopics[peer].orEmpty().any { rooms[it]?.ready == true }
+                    val sharesReadyRoom = peerPresence.sharesReadyRoom(peer) { rooms[it]?.ready == true }
                     if (peer != myPeerID && !sharesReadyRoom && core.getPeerInfo(peer)?.isConnected == true &&
                         sendDirected(peer, routed)) accepted = true
                 }
@@ -99,6 +110,7 @@ class CloudflareMeshService(
                     com.bitchat.android.services.IncomingMessageAdmission.canAcknowledgePrivateDuplicate(message)
             },
             onPrivateDeliveryAcknowledged = { id, peer -> privateOutbox.acknowledge(id, peer) },
+            onStarted = ::onCoreStarted,
             announcementNicknameProvider = { com.bitchat.android.services.NicknameProvider.getNickname(context, myPeerID) }
         ),
         bridgeToOtherTransports = false,
@@ -131,6 +143,14 @@ class CloudflareMeshService(
         routed.peerID?.let { core.setDirectConnection(it, true) }
         val room = routed.ingressLinkID?.split(":")?.getOrNull(1)
         histories.entries.firstOrNull { TopicPayload.roomId(it.key) == room }?.value?.onPublicPacketSeen(routed.packet)
+    }
+
+    private fun onCoreStarted() {
+        if (!running) return
+        privateTargets.forEach { core.sendAnnouncementToPeer(it) }
+        rooms.forEach { (channel, connection) ->
+            if (connection.ready) histories[channel]?.scheduleInitialSync(1000)
+        }
     }
 
     private fun cachePublicPacket(packet: BitchatPacket) {
@@ -166,9 +186,10 @@ class CloudflareMeshService(
     }
 
     private fun removePeerFromTopic(peer: String, channel: String) {
-        peerTopics[peer]?.remove(channel)
-        if (peerTopics[peer]?.isEmpty() == true) { peerTopics.remove(peer); links.remove(peer); core.removePeer(peer) }
+        peerPresence.removePeerFromTopic(peer, channel, ::removeUnreachablePeer)
     }
+
+    private fun removeUnreachablePeer(peer: String) { links.remove(peer); core.removePeer(peer) }
 
     private fun admitMessage(message: BitchatMessage): Boolean {
         if (!running) return false
@@ -192,7 +213,7 @@ class CloudflareMeshService(
         get() = core.delegate
         set(value) { core.delegate = value }
 
-    fun join(channel: String) {
+    @Synchronized fun join(channel: String) {
         val name = TopicPayload.normalize(channel)
         TopicPayload.joinedTopics.add(name)
         histories.computeIfAbsent(name, ::history)
@@ -205,14 +226,17 @@ class CloudflareMeshService(
         if (running) connection.start()
     }
 
-    fun leave(channel: String) {
+    @Synchronized fun leave(channel: String) {
         rooms.remove(channel)?.stop(); histories.remove(channel)?.clear()
-        peerTopics.keys.toList().forEach { removePeerFromTopic(it, channel) }
+        peerPresence.removeTopic(channel, ::removeUnreachablePeer)
         TopicRelayState.remove(channel); TopicPayload.joinedTopics.remove(channel)
     }
     fun protect(channel: String): Boolean = (TopicPayload.pendingCommitment(channel) ?: TopicPayload.expectedCommitment(channel))
         ?.let { rooms[channel]?.protect(it) } == true
-    fun isOnline(peerID: String): Boolean = running && mailbox.ready && core.getPeerInfo(peerID)?.isConnected == true
+    fun isOnline(peerID: String): Boolean = running && mailbox.ready && core.getPeerInfo(peerID)?.isConnected == true &&
+        (peerPresence.hasRecentMailboxTraffic(peerID) || peerPresence.sharesReadyRoom(peerID) { rooms[it]?.ready == true })
+    fun canQueuePrivateMessage(peerID: String): Boolean = running &&
+        (peerID in privateTargets || core.getPeerInfo(peerID) != null)
 
     private fun connection(kind: String, id: String, channel: String?): RelayConnection = RelayConnection(
         BuildConfig.RELAY_URL, kind, id, scope, client, crypto, myPeerID,
@@ -220,21 +244,24 @@ class CloudflareMeshService(
             // A room never accepts an envelope naming another topic. Fragment contents
             // are checked after signature verification by the shared message handler.
             val declared = TopicPayload.peekChannel(packet.payload)
-            if (!isBlocked(peer) && (channel == null || declared == null || declared == channel)) {
+            if (!running) false
+            else if (!isBlocked(peer) && (channel == null || declared == null || declared == channel)) {
                 links[peer] = link
-                if (channel != null) peerTopics.computeIfAbsent(peer) { ConcurrentHashMap.newKeySet() }.add(channel)
+                peerPresence.record(peer, channel)
+                if (channel == null) privateTargets.add(peer)
                 core.processIncoming(packet, peer, peer, link)
-            }
+            } else true // Permanently rejected content is consumed, never retried indefinitely.
         },
         onReady = {
             core.sendBroadcastAnnounce()
+            if (channel == null) privateTargets.forEach { core.sendAnnouncementToPeer(it) }
             if (channel != null) histories[channel]?.scheduleInitialSync(1000)
             if (channel != null && TopicRelayState.owners[channel] == TopicPayload.hex(requireNotNull(crypto.getStaticPublicKey())) &&
                 (TopicPayload.hasKey(channel) || TopicPayload.pendingCommitment(channel) != null)) protect(channel)
         },
         onStatus = { status -> if (channel != null) {
             TopicRelayState.setStatus(channel, status)
-            if (status == "disconnected" || status == "password_required") peerTopics.keys.toList().forEach { removePeerFromTopic(it, channel) }
+            if (status == "disconnected" || status == "password_required") peerPresence.removeTopic(channel, ::removeUnreachablePeer)
         } },
         onProtection = if (channel == null) null else { owner, commitment ->
             if (owner != null) TopicRelayState.owners[channel] = owner
@@ -260,29 +287,47 @@ class CloudflareMeshService(
     )
 
     private fun sendDirected(peerID: String, routed: RoutedPacket): Boolean {
-        if (!running || TopicPayload.hex(routed.packet.senderID) != myPeerID || !mailbox.ready) return false
-        return sender.send(routed, "private relay") { mailbox.send(it.packet, peerID) }
-    }
-
-    override fun startServices() {
-        if (running) return
-        running = true; core.startCore(); mailbox.start(); rooms.values.forEach { it.start() }
-        presenceJob = scope.launch {
-            while (isActive && running) { delay(60_000); if (mailbox.ready || rooms.values.any { it.ready }) core.sendBroadcastAnnounce() }
+        val generation = synchronized(transportWriteLock) {
+            if (!running || TopicPayload.hex(routed.packet.senderID) != myPeerID || !mailbox.ready) return false
+            transportGeneration
+        }
+        return sender.send(routed, "private relay") { fragment ->
+            sendIfCurrent(generation) { mailbox.send(fragment.packet, peerID) }
         }
     }
-    override fun stopServices() {
-        running = false; presenceJob?.cancel(); presenceJob = null
+
+    // The sender can outlive a service stop while waiting between fragments. Serialize
+    // each concrete write with generation changes, without holding this lock in core calls.
+    private fun sendIfCurrent(generation: Long, send: () -> Boolean): Boolean = synchronized(transportWriteLock) {
+        running && generation == transportGeneration && send()
+    }
+
+    @Synchronized override fun startServices() {
+        if (running) return
+        synchronized(transportWriteLock) { transportGeneration++; running = true }
+        core.startCore(); mailbox.start(); rooms.values.forEach { it.start() }
+        presenceJob = scope.launch {
+            while (isActive && running) {
+                delay(60_000)
+                peerPresence.expireMailboxRoutes(::removeUnreachablePeer)
+                if (mailbox.ready || rooms.values.any { it.ready }) core.sendBroadcastAnnounce()
+            }
+        }
+    }
+    @Synchronized override fun stopServices() {
+        synchronized(transportWriteLock) { running = false; transportGeneration++ }
+        presenceJob?.cancel(); presenceJob = null
         privateOutbox.clear()
         mailbox.stop()
         rooms.forEach { (channel, connection) -> connection.stop(); TopicRelayState.setStatus(channel, "disconnected") }
-        core.stopCore(); core.clearAllInternalData(); links.clear(); peerTopics.clear()
+        core.stopCore(); core.clearAllInternalData(); links.clear(); peerPresence.clear()
         com.bitchat.android.services.AppStateStore.clearTransportPeers(transport.id)
         com.bitchat.android.services.AppStateStore.clearTransportDirectPeers(transport.id)
     }
     override fun sendMessage(content: String, mentions: List<String>, channel: String?) = core.sendMessage(content, mentions, channel)
-    override fun sendPrivateMessage(content: String, recipientPeerID: String, recipientNickname: String, messageID: String?) {
+    @Synchronized override fun sendPrivateMessage(content: String, recipientPeerID: String, recipientNickname: String, messageID: String?) {
         if (!running || content.isEmpty() || recipientPeerID.isEmpty()) return
+        privateTargets.add(recipientPeerID)
         privateOutbox.enqueue(content, recipientPeerID, recipientNickname, messageID ?: java.util.UUID.randomUUID().toString())
     }
     override fun sendReadReceipt(messageID: String, recipientPeerID: String, readerNickname: String) = core.sendReadReceipt(messageID, recipientPeerID, readerNickname)
@@ -318,8 +363,9 @@ class CloudflareMeshService(
     override fun getDeviceAddressToPeerMapping(): Map<String, String> = emptyMap()
     override fun printDeviceAddressesForPeers() = "Cloud relay"
     override fun getDebugStatus() = "Cloud relay: ${rooms.size} joined topics"
-    override fun clearAllInternalData() {
-        stopServices(); rooms.clear(); histories.values.forEach { it.clear() }; histories.clear(); peerTopics.clear()
+    @Synchronized override fun clearAllInternalData() {
+        stopServices(); rooms.clear(); histories.values.forEach { it.clear() }; histories.clear(); peerPresence.clear()
+        privateTargets.clear()
         core.clearAllInternalData(); TopicRelayState.clear(); TopicPayload.clear()
     }
     override fun clearAllEncryptionData() = core.clearAllEncryptionData()

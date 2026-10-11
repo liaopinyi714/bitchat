@@ -1,4 +1,9 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
+import java.nio.file.Files
+import java.security.MessageDigest
+import java.util.HexFormat
 
 plugins {
     alias(libs.plugins.android.application)
@@ -27,6 +32,97 @@ val previewSigning = providers.gradleProperty("bitchat.previewSigning")
     .map { it.toBooleanStrict() }
     .orElse(false)
 
+// Keep the content-binding format/rules in sync with tools/build_provenance.py.
+// This deliberately includes uncommitted source files, but excludes host-specific
+// local.properties, tests, documentation and generated build outputs.
+abstract class GenerateReleaseBuildProvenance : DefaultTask() {
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val sourceFiles: ConfigurableFileCollection
+
+    @get:Internal
+    abstract val repositoryDirectory: DirectoryProperty
+
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    @TaskAction
+    fun generate() {
+        val root = repositoryDirectory.get().asFile.toPath().toRealPath()
+        val textSuffixes = setOf(
+            ".kt", ".java", ".xml", ".pro", ".gradle", ".kts", ".properties",
+            ".toml", ".json", ".txt", ".md", ".html", ".js", ".css", ".svg",
+            ".yml", ".yaml", ".lockfile", ".csv", ".pem", ".base64", ".sh", ".bat"
+        )
+        val files = sourceFiles.files.associateBy { source ->
+            check(!Files.isSymbolicLink(source.toPath()) && source.toPath().toRealPath().startsWith(root)) {
+                "Release source inputs must be files within the repository"
+            }
+            root.relativize(source.toPath().toRealPath()).toString().replace('\\', '/')
+        }
+        check(files.keys.containsAll(listOf("android/app/build.gradle.kts", "android/app/src/main/AndroidManifest.xml"))) {
+            "Required phone source inputs unavailable"
+        }
+        val paths = files.keys.sortedWith { left, right ->
+            val a = left.toByteArray(Charsets.UTF_8)
+            val b = right.toByteArray(Charsets.UTF_8)
+            var comparison = 0
+            for (index in 0 until minOf(a.size, b.size)) {
+                comparison = (a[index].toInt() and 255).compareTo(b[index].toInt() and 255)
+                if (comparison != 0) break
+            }
+            if (comparison != 0) comparison else a.size.compareTo(b.size)
+        }
+        val digest = MessageDigest.getInstance("SHA-256")
+        digest.update("bitchat-apk-source-v1\n".toByteArray(Charsets.US_ASCII))
+        for (path in paths) {
+            val source = files.getValue(path)
+            var data = source.readBytes()
+            if ("." + source.extension.lowercase() in textSuffixes || source.name == "gradlew") {
+                val text = Charsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(data)).toString()
+                data = text.replace("\r\n", "\n").replace("\r", "\n").toByteArray(Charsets.UTF_8)
+            }
+            digest.update(path.toByteArray(Charsets.UTF_8))
+            digest.update(0.toByte())
+            digest.update(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(data)).toByteArray(Charsets.US_ASCII))
+            digest.update('\n'.code.toByte())
+        }
+        val output = outputDirectory.file("bitchat-build-provenance.json").get().asFile
+        output.parentFile.mkdirs()
+        output.writeText(
+            "{\"schema\":1,\"algorithm\":\"bitchat-apk-source-v1\",\"sourceSha256\":\"${HexFormat.of().formatHex(digest.digest())}\",\"fileCount\":${files.size}}\n",
+            Charsets.UTF_8
+        )
+    }
+}
+
+val generateReleaseBuildProvenance = tasks.register<GenerateReleaseBuildProvenance>("generateReleaseBuildProvenance") {
+    repositoryDirectory.set(rootProject.layout.projectDirectory.dir(".."))
+    sourceFiles.from(rootProject.fileTree("..") {
+        include(
+            "android/app/src/main/**", "android/app/src/release/**",
+            "android/app/*.gradle", "android/app/*.gradle.kts", "android/app/*.pro", "android/app/*.lockfile",
+            "android/app/gradle/**", "android/*.gradle", "android/*.gradle.kts", "android/*.properties",
+            "android/*.lockfile", "android/gradle/**", "android/gradlew", "android/gradlew.bat",
+            "android/wear/*.gradle", "android/wear/*.gradle.kts", "android/wear/*.lockfile"
+        )
+        exclude("**/.gradle/**", "**/.git/**", "android/local.properties")
+    })
+    outputDirectory.set(layout.buildDirectory.dir("generated/releaseBuildProvenance/assets"))
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(
+            generateReleaseBuildProvenance,
+            GenerateReleaseBuildProvenance::outputDirectory
+        )
+    }
+}
+
 android {
     namespace = "com.bitchat.android"
     compileSdk = libs.versions.compileSdk.get().toInt()
@@ -36,8 +132,8 @@ android {
         applicationId = "xyz.liaopinyi714.bitchat"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 11
-        versionName = "0.2.3"
+        versionCode = 12
+        versionName = "0.2.4"
         buildConfigField("String", "RELAY_URL", "\"wss://chat.123456714.xyz\"")
         buildConfigField(
             "String",

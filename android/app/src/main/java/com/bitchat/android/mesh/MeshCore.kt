@@ -24,6 +24,12 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.joinAll
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -42,7 +48,8 @@ class MeshCore(
     private val hooks: Hooks = Hooks(),
     private val bridgeToOtherTransports: Boolean = true,
     private val enablePeriodicGossip: Boolean = true,
-    private val directedAnnouncements: Boolean = false
+    private val directedAnnouncements: Boolean = false,
+    packetDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) {
     data class Hooks(
         /**
@@ -58,12 +65,22 @@ class MeshCore(
         val readReceiptInterceptor: ((String, String) -> Boolean)? = null,
         val onReadReceiptSent: ((String) -> Unit)? = null,
         val announcementNicknameProvider: (() -> String?)? = null,
-        val leavePayloadProvider: (() -> ByteArray)? = null
+        val leavePayloadProvider: (() -> ByteArray)? = null,
+        val onStarted: (() -> Unit)? = null
     )
 
+    private val lifecycleLock = Any()
+    @Volatile private var lifecycleGeneration = 0L
+    private var startRequested = false
+    private var destroyed = false
+    @Volatile private var isActive = false
+    private var workJob: Job = SupervisorJob(scope.coroutineContext[Job])
+    @Volatile private var workScope = CoroutineScope(scope.coroutineContext + workJob)
+    private var drainingJobs = emptyList<Job>()
+    private var activationJob: Job? = null
     private val peerManager = PeerManager()
     val fragmentManager = FragmentManager()
-    private val readReceiptRetrySender = RetryingControlPacketSender(scope)
+    private var readReceiptRetrySender = RetryingControlPacketSender(workScope)
     private val authenticatedPeerStateStore = SecureAuthenticatedPeerStateStore(context)
     private val authenticatedPeerState by lazy {
         AuthenticatedPeerStateCoordinator(
@@ -118,7 +135,7 @@ class MeshCore(
     private val securityManager = SecurityManager(encryptionService, myPeerID)
     private val storeForwardManager = StoreForwardManager()
     private val messageHandler = MessageHandler(myPeerID, context.applicationContext)
-    private val packetProcessor = PacketProcessor(myPeerID)
+    private val packetProcessor = PacketProcessor(myPeerID, packetDispatcher)
     private data class VoiceFrameRequest(val recipientPeerID: String?, val payload: ByteArray)
     private val voiceFrameQueue = Channel<VoiceFrameRequest>(capacity = 128)
     private val directPeers = ConcurrentHashMap.newKeySet<String>()
@@ -129,12 +146,9 @@ class MeshCore(
 
     var delegate: MeshDelegate? = null
 
-    private var isActive = false
-
     init {
-        scope.launch {
-            for (request in voiceFrameQueue) dispatchVoiceFrame(request)
-        }
+        workJob.cancel()
+        packetProcessor.pause()
         messageHandler.packetProcessor = packetProcessor
         peerManager.isPeerDirectlyConnected = { peerID -> directPeers.contains(peerID) }
         setupDelegates()
@@ -146,8 +160,7 @@ class MeshCore(
                 }
 
                 override fun sendPacketToPeer(peerID: String, packet: BitchatPacket) {
-                    transport.sendPacketToPeer(peerID, packet)
-                    if (bridgeToOtherTransports) TransportBridgeService.sendToPeer(transport.id, peerID, packet)
+                    dispatchToPeer(peerID, packet)
                 }
 
                 override fun signPacketForBroadcast(packet: BitchatPacket): BitchatPacket {
@@ -159,23 +172,68 @@ class MeshCore(
 
     fun startCore() {
         com.bitchat.android.services.AppStateStore.setLocalPeerID(myPeerID)
-        if (isActive) return
-        isActive = true
-        if (ownsGossipManager && enablePeriodicGossip) {
-            gossipSyncManager.start()
+        synchronized(lifecycleLock) {
+            if (destroyed || startRequested) return
+            startRequested = true
+            val generation = ++lifecycleGeneration
+            val pending = drainingJobs.filterNot { it.isCompleted }
+            if (pending.isEmpty()) {
+                if (drainingJobs.isNotEmpty()) clearAllInternalData()
+                activateCoreLocked()
+            } else {
+                // Some crypto/storage callbacks are synchronous and cannot be interrupted.
+                // Wait off the caller thread; never let them overlap a replacement generation.
+                activationJob = scope.launch {
+                    pending.joinAll()
+                    synchronized(lifecycleLock) {
+                        if (startRequested && generation == lifecycleGeneration && !destroyed) {
+                            clearAllInternalData()
+                            activateCoreLocked()
+                        }
+                    }
+                }
+            }
         }
     }
 
+    private fun activateCoreLocked() {
+        if (drainingJobs.isNotEmpty()) {
+            encryptionService.getEstablishedPeers().forEach { peer ->
+                authenticatedPeerState.clear(peer)
+                encryptionService.removePeer(peer)
+            }
+        }
+        drainingJobs = emptyList()
+        workJob = SupervisorJob(scope.coroutineContext[Job])
+        workScope = CoroutineScope(scope.coroutineContext + workJob)
+        readReceiptRetrySender = RetryingControlPacketSender(workScope)
+        packetProcessor.resume()
+        isActive = true
+        workScope.launch { for (request in voiceFrameQueue) dispatchVoiceFrame(request) }
+        if (ownsGossipManager && enablePeriodicGossip) gossipSyncManager.start()
+        // A transport may already be ready while an old blocking callback drains. Publish
+        // identity again now that this generation can actually dispatch packets.
+        sendBroadcastAnnounce()
+        hooks.onStarted?.invoke()
+    }
+
     fun stopCore() {
-        if (!isActive) return
-        isActive = false
-        directPeers.clear()
-        if (ownsGossipManager) {
-            gossipSyncManager.stop()
+        synchronized(lifecycleLock) {
+            startRequested = false
+            lifecycleGeneration++
+            isActive = false
+            activationJob?.cancel(); activationJob = null
+            workJob.cancel()
+            drainingJobs = (drainingJobs + packetProcessor.pause() + workJob).distinct()
+            while (voiceFrameQueue.tryReceive().isSuccess) { /* Discard old live audio. */ }
+            directPeers.clear()
+            if (ownsGossipManager) gossipSyncManager.stop()
         }
     }
 
     fun shutdown() {
+        synchronized(lifecycleLock) { destroyed = true }
+        stopCore()
         directPeers.clear()
         peerManager.shutdown()
         fragmentManager.shutdown()
@@ -190,32 +248,57 @@ class MeshCore(
         peerID: String?,
         relayAddress: String?,
         ingressLinkID: String? = null
-    ) {
-        packetProcessor.processPacket(
-            RoutedPacket(
-                packet = packet,
-                peerID = peerID,
-                relayAddress = relayAddress,
-                ingressLinkID = ingressLinkID
+    ): Boolean {
+        return synchronized(lifecycleLock) {
+            if (!isActive) return false
+            packetProcessor.processPacket(
+                RoutedPacket(
+                    packet = packet,
+                    peerID = peerID,
+                    relayAddress = relayAddress,
+                    ingressLinkID = ingressLinkID
+                )
             )
-        )
+        }
     }
 
     fun sendFromBridge(packet: RoutedPacket) {
-        transport.broadcastPacket(packet)
+        sendFromBridgeAndReport(packet)
     }
 
-    fun sendFromBridgeAndReport(packet: RoutedPacket): Boolean {
-        return transport.broadcastPacket(packet)
+    fun sendFromBridgeAndReport(packet: RoutedPacket): Boolean = synchronized(lifecycleLock) {
+        isActive && transport.broadcastPacket(packet)
     }
 
-    private fun dispatchGlobal(routed: RoutedPacket) {
-        transport.broadcastPacket(routed)
+    private fun dispatchGlobal(routed: RoutedPacket, expectedGeneration: Long? = null): Boolean {
+        synchronized(lifecycleLock) {
+            if (!isActive || (expectedGeneration != null && expectedGeneration != lifecycleGeneration)) return false
+            transport.broadcastPacket(routed)
+        }
+        // A bridge can enter another core: never hold two lifecycle locks at once.
         if (bridgeToOtherTransports) TransportBridgeService.broadcast(transport.id, routed)
+        return true
+    }
+
+    private fun dispatchToPeer(
+        peerID: String,
+        packet: BitchatPacket,
+        bridge: Boolean = bridgeToOtherTransports,
+        expectedGeneration: Long? = null
+    ): Boolean {
+        val accepted = synchronized(lifecycleLock) {
+            if (!isActive || (expectedGeneration != null && expectedGeneration != lifecycleGeneration)) return false
+            transport.sendPacketToPeer(peerID, packet)
+        }
+        if (bridge) TransportBridgeService.sendToPeer(transport.id, peerID, packet)
+        return accepted
     }
 
     private suspend fun dispatchGlobalAndReport(routed: RoutedPacket): Boolean {
-        val acceptedByLocalTransport = transport.broadcastPacket(routed)
+        val acceptedByLocalTransport = synchronized(lifecycleLock) {
+            if (!isActive) return false
+            transport.broadcastPacket(routed)
+        }
         val acceptedByBridgedTransport =
             if (bridgeToOtherTransports) TransportBridgeService.broadcastAndReport(transport.id, routed) else false
         return acceptedByLocalTransport || acceptedByBridgedTransport
@@ -224,6 +307,7 @@ class MeshCore(
     private fun setupDelegates() {
         peerManager.delegate = object : PeerManagerDelegate {
             override fun onPeerListUpdated(peerIDs: List<String>) {
+                if (!isActive) return
                 try { com.bitchat.android.services.AppStateStore.setTransportPeers(transport.id, peerIDs) } catch (_: Exception) { }
                 delegate?.didUpdatePeerList(peerIDs)
             }
@@ -245,12 +329,13 @@ class MeshCore(
                 directRelayAddress: String?,
                 ingressLinkID: String?
             ) {
+                if (!isActive) return
                 authenticatedPeerState.onSessionAuthenticated(
                     peerID,
                     authenticatedRemoteStaticKey,
                     authenticatedSessionToken
                 )
-                scope.launch {
+                workScope.launch {
                     delay(100)
                     sendAnnouncementToPeer(peerID)
                     delay(1000)
@@ -410,12 +495,13 @@ class MeshCore(
             }
 
             override fun onMessageReceived(message: BitchatMessage): Boolean {
+                if (!isActive) return false
                 if (hooks.onMessageReceived?.invoke(message) == false) return false
                 delegate?.didReceiveMessage(message)
                 return true
             }
             override fun canAcknowledgePrivateDuplicate(message: BitchatMessage): Boolean =
-                hooks.canAcknowledgePrivateDuplicate?.invoke(message) == true
+                isActive && hooks.canAcknowledgePrivateDuplicate?.invoke(message) == true
             override fun onVerifiedPublicPacket(packet: BitchatPacket) {
                 hooks.onVerifiedPublicPacket?.invoke(packet)
             }
@@ -493,7 +579,7 @@ class MeshCore(
             }
 
             override fun handleMessage(routed: RoutedPacket) {
-                scope.launch { messageHandler.handleMessage(routed) }
+                workScope.launch { messageHandler.handleMessage(routed) }
                 try {
                     val pkt = routed.packet
                     val isBroadcast = (pkt.recipientID == null || pkt.recipientID.contentEquals(SpecialRecipients.BROADCAST))
@@ -507,7 +593,7 @@ class MeshCore(
                 messageHandler.handlePublicVoiceFrame(routed)
 
             override fun handleLeave(routed: RoutedPacket) {
-                scope.launch { messageHandler.handleLeave(routed) }
+                workScope.launch { messageHandler.handleLeave(routed) }
             }
 
             override fun handleFragment(packet: BitchatPacket): BitchatPacket? {
@@ -533,9 +619,7 @@ class MeshCore(
             }
 
             override fun sendToPeer(peerID: String, routed: RoutedPacket): Boolean {
-                val sent = transport.sendPacketToPeer(peerID, routed.packet)
-                if (bridgeToOtherTransports) TransportBridgeService.sendToPeer(transport.id, peerID, routed.packet)
-                return sent
+                return dispatchToPeer(peerID, routed.packet)
             }
 
             override fun handleRequestSync(routed: RoutedPacket) {
@@ -549,7 +633,7 @@ class MeshCore(
 
     fun sendMessage(content: String, mentions: List<String> = emptyList(), channel: String? = null) {
         if (content.isEmpty()) return
-        scope.launch {
+        workScope.launch {
             val packet = BitchatPacket(
                 version = 1u,
                 type = MessageType.MESSAGE.value,
@@ -597,7 +681,7 @@ class MeshCore(
         try {
             val raw = file.encode() ?: return
             val payload = channel?.let { com.bitchat.android.cloudflare.TopicPayload.encode(it, raw) } ?: raw
-            scope.launch {
+            workScope.launch {
                 val packet = BitchatPacket(
                     version = 2u,
                     type = MessageType.FILE_TRANSFER.value,
@@ -640,8 +724,10 @@ class MeshCore(
     }
 
     fun sendVoiceFrame(recipientPeerID: String?, payload: ByteArray) {
-        if (payload.isEmpty()) return
-        voiceFrameQueue.trySend(VoiceFrameRequest(recipientPeerID, payload.copyOf()))
+        synchronized(lifecycleLock) {
+            if (!isActive || payload.isEmpty()) return
+            voiceFrameQueue.trySend(VoiceFrameRequest(recipientPeerID, payload.copyOf()))
+        }
     }
 
     private fun dispatchVoiceFrame(request: VoiceFrameRequest) {
@@ -683,6 +769,7 @@ class MeshCore(
         transferId: String,
         allowLegacyFallback: Boolean
     ): PrivateMediaPreparation {
+        val preparedGeneration = lifecycleGeneration
         return when (val outcome = privateMediaPreparer.prepare(
             recipientPeerID = recipientPeerID,
             recipientID = MeshPacketUtils.hexStringToByteArray(recipientPeerID),
@@ -706,12 +793,8 @@ class MeshCore(
                 )
                 PrivateMediaPreparation.Ready(
                     PreparedPrivateMediaTransfer(transferId, built.wireMode) {
-                        if (!isActive) {
-                            false
-                        } else {
-                            dispatchGlobal(routed)
-                            true
-                        }
+                        // Generation validation and local transport admission share one lock.
+                        dispatchGlobal(routed, expectedGeneration = preparedGeneration)
                     }
                 )
             }
@@ -724,7 +807,7 @@ class MeshCore(
 
     fun sendPrivateMessage(content: String, recipientPeerID: String, recipientNickname: String, messageID: String? = null) {
         if (content.isEmpty() || recipientPeerID.isEmpty()) return
-        scope.launch {
+        workScope.launch {
             val finalMessageID = messageID ?: java.util.UUID.randomUUID().toString()
 
             if (encryptionService.hasEstablishedSession(recipientPeerID)) {
@@ -758,7 +841,7 @@ class MeshCore(
     }
 
     fun sendReadReceipt(messageID: String, recipientPeerID: String, readerNickname: String) {
-        scope.launch {
+        workScope.launch {
             if (hooks.readReceiptInterceptor?.invoke(messageID, recipientPeerID) == true) return@launch
             try {
                 val payload = NoisePayload(
@@ -818,7 +901,7 @@ class MeshCore(
     }
 
     private fun sendNoisePayloadToPeer(payload: NoisePayload, recipientPeerID: String) {
-        scope.launch {
+        workScope.launch {
             try {
                 val encrypted = encryptionService.encrypt(payload.encode(), recipientPeerID)
                 val packet = BitchatPacket(
@@ -839,7 +922,7 @@ class MeshCore(
     }
 
     fun sendBroadcastAnnounce() {
-        scope.launch {
+        workScope.launch {
             val nickname = hooks.announcementNicknameProvider?.invoke()
                 ?: delegate?.getNickname()
                 ?: myPeerID
@@ -866,6 +949,7 @@ class MeshCore(
     }
 
     fun sendAnnouncementToPeer(peerID: String) {
+        val generation = lifecycleGeneration
         if (peerManager.hasAnnouncedToPeer(peerID)) return
         val nickname = hooks.announcementNicknameProvider?.invoke()
             ?: delegate?.getNickname()
@@ -881,10 +965,14 @@ class MeshCore(
             payload = tlvPayload
         )
         val signedPacket = signPacketBeforeBroadcast(packet)
-        if (directedAnnouncements) transport.sendPacketToPeer(peerID, signedPacket)
-        else dispatchGlobal(RoutedPacket(signedPacket))
-        peerManager.markPeerAsAnnouncedTo(peerID)
-        try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
+        val admitted = if (directedAnnouncements) {
+            dispatchToPeer(peerID, signedPacket, bridge = false, expectedGeneration = generation)
+        } else dispatchGlobal(RoutedPacket(signedPacket), expectedGeneration = generation)
+        if (admitted) synchronized(lifecycleLock) {
+            if (!isActive || generation != lifecycleGeneration) return
+            peerManager.markPeerAsAnnouncedTo(peerID)
+            try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
+        }
     }
 
     private fun buildAnnouncementPayload(announcement: IdentityAnnouncement, nickname: String): ByteArray? {
@@ -976,7 +1064,7 @@ class MeshCore(
     }
 
     fun initiateNoiseHandshake(peerID: String) {
-        scope.launch {
+        workScope.launch {
             try {
                 val handshakeData = encryptionService.initiateHandshake(peerID) ?: return@launch
                 val packet = BitchatPacket(

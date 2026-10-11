@@ -23,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.LaunchedEffect
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.Dispatchers
@@ -34,6 +35,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.Image
@@ -83,12 +85,12 @@ fun FullScreenImageViewer(imagePaths: List<String>, initialIndex: Int = 0, onClo
             Toast.makeText(context, if (saved) savedMessage else failedMessage, Toast.LENGTH_SHORT).show()
         }
     }
-    val pagerState = rememberPagerState(initialPage = initialIndex, pageCount = imagePaths::size)
-
     if (imagePaths.isEmpty()) {
-        onClose()
+        LaunchedEffect(Unit) { onClose() }
         return
     }
+    val pagerState = rememberPagerState(initialPage = initialIndex.coerceIn(imagePaths.indices), pageCount = imagePaths::size)
+    val imageSize = LocalWindowInfo.current.containerSize
 
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(color = Color.Black) {
@@ -98,7 +100,7 @@ fun FullScreenImageViewer(imagePaths: List<String>, initialIndex: Int = 0, onClo
                     modifier = Modifier.fillMaxSize()
                 ) { page ->
                     val currentPath = imagePaths[page]
-                    val bmp = remember(currentPath) { try { android.graphics.BitmapFactory.decodeFile(currentPath) } catch (_: Exception) { null } }
+                    val bmp by rememberImageBitmap(currentPath, imageSize.width, imageSize.height)
 
                     bmp?.let {
                         androidx.compose.foundation.Image(
@@ -144,7 +146,7 @@ fun FullScreenImageViewer(imagePaths: List<String>, initialIndex: Int = 0, onClo
                             .size(36.dp)
                             .background(Color(0x66000000), CircleShape)
                             .clickable {
-                                val path = imagePaths[pagerState.currentPage]
+                                val path = imagePaths.getOrNull(pagerState.currentPage) ?: return@clickable
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) saveScope.launch { saveToDownloads(context, path) }
                                 else { pendingSavePath = path; legacySave.launch(File(path).name) }
                             },
@@ -170,32 +172,8 @@ fun FullScreenImageViewer(imagePaths: List<String>, initialIndex: Int = 0, onClo
 
 @androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
 private suspend fun saveToDownloads(context: android.content.Context, path: String) {
-    val saved = withContext(Dispatchers.IO) { runCatching {
-        val name = File(path).name
-        val mime = when {
-            name.endsWith(".png", true) -> "image/png"
-            name.endsWith(".webp", true) -> "image/webp"
-            else -> "image/jpeg"
-        }
-        val values = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, name)
-            put(MediaStore.Downloads.MIME_TYPE, mime)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.Downloads.IS_PENDING, 1)
-            }
-        }
-        val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-        if (uri != null) {
-            context.contentResolver.openOutputStream(uri)?.use { out ->
-                File(path).inputStream().use { it.copyTo(out) }
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val v2 = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
-                context.contentResolver.update(uri, v2, null, null)
-            }
-        } else {
-            error("Could not create image")
-        }
-    }.isSuccess }
+    val saved = withContext(Dispatchers.IO) {
+        com.bitchat.android.features.media.ImageExport.saveToDownloads(context.contentResolver, File(path))
+    }
     Toast.makeText(context, context.getString(if (saved) R.string.toast_image_saved else R.string.toast_failed_to_save_image), Toast.LENGTH_SHORT).show()
 }

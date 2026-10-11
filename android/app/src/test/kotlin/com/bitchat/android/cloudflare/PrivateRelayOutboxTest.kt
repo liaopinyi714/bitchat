@@ -8,6 +8,8 @@ import kotlinx.coroutines.test.runCurrent
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class PrivateRelayOutboxTest {
@@ -69,5 +71,38 @@ class PrivateRelayOutboxTest {
         advance(300_000)
         assertEquals(1, attempts.size)
         assertTrue(failures.isEmpty())
+    }
+
+    @Test fun `receipt on another thread can complete during a send callback`() {
+        val executor = Executors.newSingleThreadExecutor { task -> Thread(task).apply { isDaemon = true } }
+        var acknowledgedDuringSend = false
+        lateinit var concurrent: PrivateRelayOutbox
+        concurrent = PrivateRelayOutbox(scope, { true }, { _, peer, _, id ->
+            executor.submit { concurrent.acknowledge(id, peer) }.get(5, TimeUnit.SECONDS)
+            acknowledgedDuringSend = true
+        }, failures::add, { scope.testScheduler.currentTime })
+        try {
+            concurrent.enqueue("synthetic text", "recipient", "name", "message-1")
+            assertTrue(acknowledgedDuringSend)
+            advance(300_000)
+            assertTrue(failures.isEmpty())
+        } finally {
+            executor.shutdownNow()
+            concurrent.clear()
+        }
+    }
+
+    @Test fun `one failing recipient does not prevent later recipients or retries`() {
+        val sent = mutableListOf<String>()
+        val retrying = PrivateRelayOutbox(scope, { true }, { _, peer, _, id ->
+            if (peer == "unavailable") throw IllegalStateException("synthetic send failure")
+            sent += id
+        }, failures::add, { scope.testScheduler.currentTime })
+        try {
+            retrying.enqueue("synthetic text", "unavailable", "name", "message-1")
+            retrying.enqueue("synthetic text", "recipient", "name", "message-2")
+            advance(10_000)
+            assertEquals(listOf("message-2", "message-2"), sent)
+        } finally { retrying.clear() }
     }
 }

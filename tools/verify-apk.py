@@ -17,6 +17,8 @@ import subprocess
 import xml.etree.ElementTree as ET
 import zipfile
 
+from build_provenance import ASSET as PROVENANCE_ASSET, source_provenance
+
 ROOT = Path(__file__).resolve().parents[1]
 ABIS = {"arm64-v8a", "armeabi-v7a", "x86", "x86_64"}
 NATIVE = {"libarti_android.so", "libbarhopper_v3.so"}
@@ -34,6 +36,14 @@ MODELS = {
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def release_fingerprint():
@@ -149,10 +159,59 @@ def check_elf_alignment(data):
     require(loads > 0, "Native library has no load segments")
 
 
-def check_apk(path, expected_abis, signed):
+def package_metadata(badging):
+    package = re.search(r"^package: (.+)$", badging, re.M)
+    require(package, "APK package metadata unavailable")
+    fields = dict(re.findall(r"(\w+)='([^']*)'", package.group(1)))
+    require(fields.get("name") and fields.get("versionCode", "").isdigit()
+            and "versionName" in fields, "Invalid APK package metadata")
+    major = fields.get("versionCodeMajor", "0")
+    require(major.isdigit(), "Invalid APK major version")
+    return {"applicationId": fields["name"], "versionCode": (int(major) << 32) | int(fields["versionCode"]),
+            "versionName": fields["versionName"]}
+
+
+def require_upgrade(previous, current):
+    require(previous["applicationId"] == current["applicationId"], "Baseline application ID differs")
+    require(current["versionCode"] > previous["versionCode"], "Release versionCode must increase above baseline")
+
+
+def require_provenance(archive, expected):
+    require(PROVENANCE_ASSET in archive.namelist(), "APK build provenance missing; rebuild current sources")
+    try:
+        actual = json.loads(archive.read(PROVENANCE_ASSET))
+    except (ValueError, UnicodeError):
+        raise ValueError("Invalid APK build provenance") from None
+    require(actual == expected, "APK source fingerprint differs from current inputs; rebuild before signing or packaging")
+    return actual
+
+
+def payload_hashes(archive):
+    common, native = {}, {}
+    for name in archive.namelist():
+        if name.endswith("/"):
+            continue
+        if (re.fullmatch(r"classes\d*\.dex", name) or name == "resources.arsc"
+                or name.startswith(("assets/", "res/"))):
+            common[name] = hashlib.sha256(archive.read(name)).hexdigest()
+        elif name.startswith("lib/"):
+            native[name] = hashlib.sha256(archive.read(name)).hexdigest()
+    return common, native
+
+
+def require_matching_payloads(reference, reference_native, current, current_native, expected_abis):
+    require(current == reference, "ABI APKs contain different code/resources/assets")
+    expected_native = {name: digest for name, digest in reference_native.items()
+                       if name.split("/")[1] in expected_abis}
+    require(current_native == expected_native, "ABI APK native libraries differ from universal APK")
+
+
+def check_apk(path, expected_abis, signed, expected_provenance):
     with zipfile.ZipFile(path) as archive:
         require(archive.testzip() is None, "Corrupt APK ZIP entry")
         names = set(archive.namelist())
+        require(len(names) == len(archive.namelist()), "Duplicate APK ZIP entry")
+        require_provenance(archive, expected_provenance)
         abis = {n.split("/")[1] for n in names if n.startswith("lib/")}
         require(abis == expected_abis, "Native ABI coverage mismatch")
         for abi in abis:
@@ -189,16 +248,15 @@ def check_apk(path, expected_abis, signed):
         require(len(fonts) == 4, "Expected original UI fonts unavailable")
         for font in fonts:
             require(hashlib.sha256(font.read_bytes()).digest() in contents, "Original UI font missing")
-        core_hashes = {n: hashlib.sha256(archive.read(n)).hexdigest() for n in names
-                       if re.fullmatch(r"classes\d*\.dex", n) or n == "resources.arsc"
-                       or n.startswith("assets/")}
+        core_hashes, native_hashes = payload_hashes(archive)
 
     badging = run_tool([sdk_tool("aapt2"), "dump", "badging", str(path)])
-    require("name='xyz.liaopinyi714.bitchat'" in badging, "Wrong application ID")
+    metadata = package_metadata(badging)
+    require(metadata["applicationId"] == "xyz.liaopinyi714.bitchat", "Wrong application ID")
     source = (ROOT / "android/app/build.gradle.kts").read_text(encoding="utf-8")
     code = re.search(r"versionCode = (\d+)", source).group(1)
     version = re.search(r'versionName = "([^"]+)"', source).group(1)
-    require(f"versionCode='{code}'" in badging and f"versionName='{version}'" in badging, "Wrong version")
+    require(metadata["versionCode"] == int(code) and metadata["versionName"] == version, "Wrong version")
     require(re.search(r"(?:sdkVersion|minSdkVersion):'34'", badging), "Wrong minimum Android SDK")
     require("targetSdkVersion:'37'" in badging, "Wrong target Android SDK")
     require("application-debuggable" not in badging, "Optimized APK is debuggable")
@@ -222,15 +280,15 @@ def check_apk(path, expected_abis, signed):
         match = re.search(r"certificate SHA-256 digest: ([a-fA-F0-9]+)", signing)
         require(match, "Signature certificate unavailable")
         certificate = match.group(1).lower()
-    return core_hashes, certificate, {"abis": sorted(abis), "apkBytes": path.stat().st_size,
-                                     "expandedDexBytes": dex_bytes}
+    return core_hashes, native_hashes, certificate, {"abis": sorted(abis), "apkBytes": path.stat().st_size,
+                                                   "expandedDexBytes": dex_bytes, "apkSha256": file_sha256(path)}
 
 
 def compare_baseline(baseline, optimized):
     """Compare native/static assets, excluding ART profiles regenerated from changed DEX."""
     with zipfile.ZipFile(baseline) as old, zipfile.ZipFile(optimized) as new:
         for name in old.namelist():
-            if name in {"assets/dexopt/baseline.prof", "assets/dexopt/baseline.profm"}:
+            if name in {"assets/dexopt/baseline.prof", "assets/dexopt/baseline.profm", PROVENANCE_ASSET}:
                 continue
             if name.startswith(("lib/", "assets/", "org/bouncycastle/")):
                 require(name in new.namelist() and old.read(name) == new.read(name),
@@ -247,16 +305,23 @@ def main():
     args = parser.parse_args()
     require(not (args.unsigned and args.release), "Unsigned APK cannot satisfy release signing checks")
     suffix = "-unsigned" if args.unsigned else ""
+    expected_provenance = source_provenance(ROOT)
     outputs = {}
-    reference_hashes, reference_certificate = None, None
+    reference_hashes, reference_native, reference_certificate = None, None, None
     universal = args.apk_dir / f"app-universal-release{suffix}.apk"
+    if args.baseline:
+        require_upgrade(
+            package_metadata(run_tool([sdk_tool("aapt2"), "dump", "badging", str(args.baseline)])),
+            package_metadata(run_tool([sdk_tool("aapt2"), "dump", "badging", str(universal)])),
+        )
     for abi in ["universal", *sorted(ABIS)]:
         apk = args.apk_dir / f"app-{abi}-release{suffix}.apk"
         require(apk.is_file(), "Expected optimized APK missing")
-        hashes, certificate, size = check_apk(apk, ABIS if abi == "universal" else {abi}, not args.unsigned)
+        expected_abis = ABIS if abi == "universal" else {abi}
+        hashes, native, certificate, size = check_apk(apk, expected_abis, not args.unsigned, expected_provenance)
         if reference_hashes is None:
-            reference_hashes, reference_certificate = hashes, certificate
-        require(hashes == reference_hashes, "ABI APKs contain different code/resources/assets")
+            reference_hashes, reference_native, reference_certificate = hashes, native, certificate
+        require_matching_payloads(reference_hashes, reference_native, hashes, native, expected_abis)
         require(certificate == reference_certificate, "ABI APK signatures differ")
         if args.release:
             verify_release_lineage(apk, args.baseline)
@@ -275,7 +340,8 @@ def main():
         for size in outputs.values():
             size["reductionPercentVsBaselineUniversal"] = round((1 - size["apkBytes"] / old_bytes) * 100, 1)
         outputs["baselineUniversalBytes"] = old_bytes
-    print(json.dumps({"checks": "passed", "outputs": outputs}, indent=2))
+    require(source_provenance(ROOT) == expected_provenance, "Source inputs changed during APK verification")
+    print(json.dumps({"checks": "passed", "sourceFingerprint": expected_provenance, "outputs": outputs}, indent=2))
 
 
 if __name__ == "__main__":

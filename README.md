@@ -10,6 +10,7 @@
 - [功能范围与验收状态](docs/FEATURES.md)
 - [构建与测试结果、尚未完成的验收](docs/TESTING.md)
 - [代码检查范围、修复及维护顺序](docs/REVIEW.md)
+- [0.2.4 整体优化与资源边界](docs/OPTIMIZATION.md)
 - [协议和加密边界](docs/PROTOCOL.md)
 - [架构与后续扩展](docs/ARCHITECTURE.md)
 - [上游来源及许可证](UPSTREAM.md)
@@ -43,4 +44,4 @@ LICENSE.md           GPL-3.0
 
 本项目使用 Workers Free 与 SQLite Durable Objects，不依赖 R2、D1、KV 或付费推送。免费额度仍有 Cloudflare 平台上限；达到上限时服务可能不可用。容量限制可配置，不能把“免费”理解为无限流量。
 
-当前版本为 **0.2.3**，沿用长期发行签名。本次修复关闭本地无线后私聊可能走旧通道、保存失败却发出送达回执的问题，并加入在线私聊文字的有界重试；保留此前权限页与连接稳定性修复，详情见 [发布说明](docs/RELEASE_NOTES_0.2.3.md)。下载以本仓库 [Releases](https://github.com/liaopinyi714/bitchat/releases) 为准。中文与英文完整性有自动回归；保留的其他语言包可能回退英文。实际手机的后台、无线互通、升级与持续运行需按 [验收清单](docs/OPERATIONS.md) 完成，具体已验证范围见 [测试记录](docs/TESTING.md)。
+当前版本为 **0.2.4**，沿用长期发行签名。本轮优化传输并发与收包队列、私聊存储、图片内存和发行检查，并修复 Worker 连接状态竞态；服务端修复需重新部署，现有协议与数据结构兼容。详情见 [整体优化说明](docs/OPTIMIZATION.md) 和 [发布说明](docs/RELEASE_NOTES_0.2.4.md)。下载以本仓库 [Releases](https://github.com/liaopinyi714/bitchat/releases) 为准。中文与英文完整性有自动回归；保留的其他语言包可能回退英文。实际手机的后台、无线互通、升级与持续运行需按 [验收清单](docs/OPERATIONS.md) 完成，具体已验证范围见 [测试记录](docs/TESTING.md)。

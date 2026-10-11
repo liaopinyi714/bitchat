@@ -7,105 +7,108 @@ import android.graphics.Matrix
 import android.net.Uri
 import androidx.exifinterface.media.ExifInterface
 import java.io.File
-import java.io.FileOutputStream
 import java.io.InputStream
 
 object ImageUtils {
-    fun downscaleAndSaveToAppFiles(context: Context, uri: Uri, maxDim: Int = 512, quality: Int = 85): String? {
+    private const val MAX_DECODE_PIXELS = 4_194_304L
+
+    fun downscaleAndSaveToAppFiles(context: Context, uri: Uri, maxDim: Int = 512, quality: Int = 85): String? =
+        prepareOutgoing(context, maxDim, quality) {
+            decodeSampled(maxDim, maxDim) { context.contentResolver.openInputStream(uri) }
+        }
+
+    fun downscalePathAndSaveToAppFiles(context: Context, path: String, maxDim: Int = 512, quality: Int = 85): String? =
+        prepareOutgoing(context, maxDim, quality) { decodeSampledBitmap(path, maxDim, maxDim) }
+
+    /** Decode only the pixels needed by the destination; callers run this on a media worker. */
+    fun decodeSampledBitmap(path: String, maxWidth: Int, maxHeight: Int): Bitmap? =
+        decodeSampled(maxWidth, maxHeight) { File(path).inputStream() }
+
+    fun loadBitmapWithExifOrientation(path: String): Bitmap? =
+        decodeSampledBitmap(path, Int.MAX_VALUE, Int.MAX_VALUE)
+
+    private fun prepareOutgoing(context: Context, maxDim: Int, quality: Int, decode: () -> Bitmap?): String? {
+        if (maxDim <= 0 || quality !in 0..100) return null
+        var decoded: Bitmap? = null
+        var scaled: Bitmap? = null
+        var output: File? = null
         return try {
-            val resolver = context.contentResolver
-            val exifRotation = resolver.openInputStream(uri)?.use { getRotationDegreesFromExif(it) } ?: 0
-
-            // Reopen for decode as the previous stream is consumed
-            val input = resolver.openInputStream(uri) ?: return null
-            val original = BitmapFactory.decodeStream(input)
-            input.close()
-            original ?: return null
-
-            val oriented = if (exifRotation != 0) rotateBitmap(original, exifRotation) else original
-
-            val w = oriented.width
-            val h = oriented.height
-            val scale = (maxOf(w, h).toFloat() / maxDim.toFloat()).coerceAtLeast(1f)
-            val newW = (w / scale).toInt().coerceAtLeast(1)
-            val newH = (h / scale).toInt().coerceAtLeast(1)
-            val scaled = if (scale > 1f) Bitmap.createScaledBitmap(oriented, newW, newH, true) else oriented
-            val dir = File(context.filesDir, "images/outgoing").apply { mkdirs() }
-            val outFile = File(dir, "img_${System.currentTimeMillis()}.jpg")
-            FileOutputStream(outFile).use { fos ->
-                scaled.compress(Bitmap.CompressFormat.JPEG, quality, fos)
-            }
-            try { if (oriented !== original) original.recycle() } catch (_: Exception) {}
-            try { if (scaled !== oriented) oriented.recycle() } catch (_: Exception) {}
-            outFile.absolutePath
-        } catch (e: Exception) {
+            val bitmap = decode() ?: return null
+            decoded = bitmap
+            val scale = minOf(1.0, maxDim.toDouble() / maxOf(bitmap.width, bitmap.height))
+            scaled = if (scale < 1.0) Bitmap.createScaledBitmap(bitmap,
+                (bitmap.width * scale).toInt().coerceAtLeast(1),
+                (bitmap.height * scale).toInt().coerceAtLeast(1), true) else bitmap
+            val directory = File(context.filesDir, "images/outgoing")
+            check(directory.isDirectory || directory.mkdirs())
+            // A timestamp alone can collide when two preparations finish in one millisecond.
+            output = File.createTempFile("img_", ".jpg", directory)
+            output.outputStream().use { check(requireNotNull(scaled).compress(Bitmap.CompressFormat.JPEG, quality, it)) }
+            output.absolutePath
+        } catch (_: Exception) {
+            output?.delete()
             null
+        } finally {
+            if (scaled !== decoded) scaled?.recycle()
+            decoded?.recycle()
         }
     }
 
-    fun downscalePathAndSaveToAppFiles(context: Context, path: String, maxDim: Int = 512, quality: Int = 85): String? {
+    private fun decodeSampled(maxWidth: Int, maxHeight: Int, open: () -> InputStream?): Bitmap? {
+        if (maxWidth <= 0 || maxHeight <= 0) return null
+        var decoded: Bitmap? = null
         return try {
-            val original = BitmapFactory.decodeFile(path) ?: return null
-            val exifRotation = getRotationDegreesFromExif(path)
-            val oriented = if (exifRotation != 0) rotateBitmap(original, exifRotation) else original
-
-            val w = oriented.width
-            val h = oriented.height
-            val scale = (maxOf(w, h).toFloat() / maxDim.toFloat()).coerceAtLeast(1f)
-            val newW = (w / scale).toInt().coerceAtLeast(1)
-            val newH = (h / scale).toInt().coerceAtLeast(1)
-            val scaled = if (scale > 1f) Bitmap.createScaledBitmap(oriented, newW, newH, true) else oriented
-            val dir = File(context.filesDir, "images/outgoing").apply { mkdirs() }
-            val outFile = File(dir, "img_${System.currentTimeMillis()}.jpg")
-            FileOutputStream(outFile).use { fos ->
-                scaled.compress(Bitmap.CompressFormat.JPEG, quality, fos)
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            val header = open() ?: return null
+            header.use { BitmapFactory.decodeStream(it, null, bounds) }
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+            val orientation = try {
+                open()?.use { ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) }
+                    ?: ExifInterface.ORIENTATION_NORMAL
+            } catch (_: Exception) { ExifInterface.ORIENTATION_NORMAL }
+            val rotated = orientation in setOf(ExifInterface.ORIENTATION_TRANSPOSE,
+                ExifInterface.ORIENTATION_ROTATE_90, ExifInterface.ORIENTATION_TRANSVERSE,
+                ExifInterface.ORIENTATION_ROTATE_270)
+            val options = BitmapFactory.Options().apply {
+                inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight,
+                    if (rotated) maxHeight else maxWidth, if (rotated) maxWidth else maxHeight)
             }
-            try { if (oriented !== original) original.recycle() } catch (_: Exception) {}
-            try { if (scaled !== oriented) oriented.recycle() } catch (_: Exception) {}
-            outFile.absolutePath
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    fun loadBitmapWithExifOrientation(path: String): Bitmap? {
-        return try {
-            val base = BitmapFactory.decodeFile(path) ?: return null
-            val rotation = getRotationDegreesFromExif(path)
-            if (rotation != 0) rotateBitmap(base, rotation) else base
+            val bitmap = open()?.use { BitmapFactory.decodeStream(it, null, options) } ?: return null
+            decoded = bitmap
+            val matrix = orientationMatrix(orientation)
+            val oriented = if (matrix.isIdentity) bitmap else
+                Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            if (oriented !== bitmap) bitmap.recycle()
+            decoded = null // Ownership transfers to the caller.
+            oriented
         } catch (_: Exception) {
             null
+        } finally {
+            decoded?.recycle()
         }
     }
 
-    private fun rotateBitmap(src: Bitmap, degrees: Int): Bitmap {
-        return try {
-            val m = Matrix()
-            m.postRotate(degrees.toFloat())
-            Bitmap.createBitmap(src, 0, 0, src.width, src.height, m, true).also {
-                try { src.recycle() } catch (_: Exception) {}
-            }
-        } catch (_: Exception) {
-            src
+    internal fun sampleSize(width: Int, height: Int, maxWidth: Int, maxHeight: Int): Int {
+        require(width > 0 && height > 0 && maxWidth > 0 && maxHeight > 0)
+        val scale = minOf(1.0, maxWidth.toDouble() / width, maxHeight.toDouble() / height)
+        var sample = 1
+        while (sample <= (1 shl 29) && sample * 2.0 <= 1.0 / scale) sample *= 2
+        // The extra budget also bounds panoramas and unusually large received images.
+        while (((width.toLong() + sample - 1) / sample) * ((height.toLong() + sample - 1) / sample) > MAX_DECODE_PIXELS) {
+            sample *= 2
         }
+        return sample
     }
 
-    private fun getRotationDegreesFromExif(path: String): Int = try {
-        val exif = ExifInterface(path)
-        orientationToDegrees(exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL))
-    } catch (_: Exception) { 0 }
-
-    private fun getRotationDegreesFromExif(stream: InputStream): Int = try {
-        val exif = ExifInterface(stream)
-        orientationToDegrees(exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL))
-    } catch (_: Exception) { 0 }
-
-    private fun orientationToDegrees(orientation: Int): Int = when (orientation) {
-        ExifInterface.ORIENTATION_ROTATE_90 -> 90
-        ExifInterface.ORIENTATION_ROTATE_180 -> 180
-        ExifInterface.ORIENTATION_ROTATE_270 -> 270
-        ExifInterface.ORIENTATION_TRANSPOSE -> 90
-        ExifInterface.ORIENTATION_TRANSVERSE -> 270
-        else -> 0
+    private fun orientationMatrix(orientation: Int) = Matrix().apply {
+        when (orientation) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> setScale(-1f, 1f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> setRotate(180f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> setScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> { setRotate(90f); postScale(-1f, 1f) }
+            ExifInterface.ORIENTATION_ROTATE_90 -> setRotate(90f)
+            ExifInterface.ORIENTATION_TRANSVERSE -> { setRotate(270f); postScale(-1f, 1f) }
+            ExifInterface.ORIENTATION_ROTATE_270 -> setRotate(270f)
+        }
     }
 }

@@ -126,6 +126,45 @@ class ConversationDatabaseTest {
     }
 
     @Test
+    fun `duplicate ID cannot merge another peers retained conversation`() {
+        val original = message("shared-id", "alice", 100L).copy(senderPeerID = "peer-a")
+        val unrelated = message("other-message", "bob", 200L).copy(senderPeerID = "peer-b")
+        database.upsertMessage("peer-a", setOf("peer-a"), "alice", original, false)
+        database.upsertMessage("peer-b", setOf("peer-b"), "bob", unrelated, false)
+
+        val collision = original.copy(sender = "bob", senderPeerID = "peer-b")
+        assertFalse(database.upsertMessage("peer-b", setOf("peer-b"), "bob", collision, true).inserted)
+
+        val snapshot = database.loadSnapshot()
+        assertEquals(listOf(original), snapshot.chats.getValue("peer-a"))
+        assertEquals(listOf(unrelated), snapshot.chats.getValue("peer-b"))
+        assertFalse(original.id in snapshot.readMessageIDs)
+    }
+
+    @Test
+    fun `matching payload alone cannot link unrelated conversation aliases`() {
+        val original = message("shared-id", "alice", 100L).copy(senderPeerID = "peer-a")
+        database.upsertMessage("peer-a", setOf("peer-a"), "alice", original, false)
+
+        assertFalse(database.upsertMessage("unrelated", setOf("unrelated"), "other", original, true).inserted)
+
+        val snapshot = database.loadSnapshot()
+        assertEquals(setOf("peer-a"), snapshot.chats.keys)
+        assertEquals("alice", snapshot.displayNames.getValue("peer-a"))
+        assertFalse(original.id in snapshot.readMessageIDs)
+    }
+
+    @Test
+    fun `single conversation load returns its exact unread state including zero`() {
+        database.upsertMessage("peer-a", setOf("alias-a"), "alice", message("read", "alice", 1L), true)
+        database.upsertMessage("peer-b", setOf("peer-b"), "bob", message("unread", "bob", 2L), false)
+
+        assertEquals(mapOf("peer-a" to 0), database.loadConversation("alias-a").unreadCounts)
+        assertEquals(mapOf("peer-b" to 1), database.loadConversation("peer-b").unreadCounts)
+        assertEquals(mapOf("peer-a" to 0, "peer-b" to 1), database.loadInitialSnapshot().unreadCounts)
+    }
+
+    @Test
     fun `conversation deletion cascades messages while a later message starts fresh`() {
         database.upsertMessage(
             "contact_alice",

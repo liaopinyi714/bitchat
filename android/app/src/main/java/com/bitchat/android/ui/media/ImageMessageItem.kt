@@ -18,7 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -55,13 +55,13 @@ fun ImageMessageItem(
     val bubblesMode = bubbles
     val imageShape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
 
-    val context = LocalContext.current
-    val bmp = remember(path) { try { android.graphics.BitmapFactory.decodeFile(path) } catch (_: Exception) { null } }
+    val previewWidth = with(LocalDensity.current) { 300.dp.roundToPx() }
+    val bmp by rememberImageBitmap(path, previewWidth, Int.MAX_VALUE)
 
     // Collect all image paths from messages for swipe navigation
-    val imagePaths = remember(messages) {
-        messages.filter { it.type == BitchatMessageType.Image }
-            .map { it.content.trim() }
+    val imagePaths: () -> List<String> = remember(messages) {
+        { messages.asSequence().filter { it.type == BitchatMessageType.Image }
+            .map { it.content.trim() }.toList() }
     }
     val haptic = LocalHapticFeedback.current
 
@@ -151,7 +151,7 @@ private fun ImageMessageCard(
     currentUserNickname: String,
     path: String,
     bmp: android.graphics.Bitmap?,
-    imagePaths: List<String>,
+    imagePaths: () -> List<String>,
     imageShape: androidx.compose.foundation.shape.RoundedCornerShape,
     onImageClick: ((String, List<String>, Int) -> Unit)?,
     onCancelTransfer: ((BitchatMessage) -> Unit)?,
@@ -174,8 +174,9 @@ private fun ImageMessageCard(
             .clip(imageShape)
             .combinedClickable(
                 onClick = {
-                    val currentIndex = imagePaths.indexOf(path)
-                    onImageClick?.invoke(path, imagePaths, currentIndex)
+                    val paths = imagePaths()
+                    val currentIndex = paths.indexOf(path)
+                    onImageClick?.invoke(path, paths, currentIndex)
                 },
                 onLongClick = { onLongPress?.invoke() },
             )

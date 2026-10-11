@@ -261,6 +261,28 @@ describe("relay authentication and isolation", () => {
     } finally { x.inbox.close(); }
   });
 
+  it("queues ciphertext when the recipient's authenticated session has failed", async () => {
+    const a = await identity(); const b = await identity();
+    const x = await connect("mail", a.peer, a); const y = await connect("mail", b.peer, b);
+    const stub = bindings.MAILBOXES.get(bindings.MAILBOXES.idFromName(b.peer));
+    try {
+      await runInDurableObject(stub, async (_instance, state) => {
+        for (const socket of state.getWebSockets()) {
+          const attachment = socket.deserializeAttachment() as Record<string, unknown>;
+          attachment.failed = true;
+          socket.serializeAttachment(attachment);
+        }
+      });
+      const frame = await send(x.inbox, packet(a.peer, b.peer, 0x11), b.peer);
+      expect((await x.inbox.next()).type).toBe("accepted");
+      expect(await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.sql.exec<{ id: string }>("SELECT id FROM pending").toArray().map((row) => row.id))).toEqual([frame.id]);
+      const reconnected = await connect("mail", b.peer, b);
+      try { expect((await reconnected.inbox.next()).id).toBe(frame.id); }
+      finally { reconnected.inbox.close(); }
+    } finally { x.inbox.close(); y.inbox.close(); }
+  });
+
   it("expires offline ciphertext and stops the alarm when the queue is empty", async () => {
     const a = await identity(); const b = await identity();
     const x = await connect("mail", a.peer, a);
@@ -292,6 +314,52 @@ describe("relay authentication and isolation", () => {
       });
       await send(inbox, packet(a.peer));
       expect((await inbox.next()).code).toBe("rate_limit");
+    } finally { inbox.close(); }
+  });
+
+  it("preserves a packet budget updated while an announcement is hashing", async () => {
+    const a = await identity();
+    const id = "b1".repeat(32); const { inbox } = await connect("room", id, a);
+    const stub = bindings.ROOMS.get(bindings.ROOMS.idFromName(id));
+    try {
+      const bytes = packet(a.peer, "ffffffffffffffff", 1);
+      const frame = JSON.stringify({ type: "packet", id: await sha256(bytes), packet: btoa(String.fromCharCode(...bytes)) });
+      const usage = await runInDurableObject(stub, async (instance, state) => {
+        const relay = instance as unknown as { webSocketMessage(socket: WebSocket, raw: string): Promise<void> };
+        const socket = state.getWebSockets()[0]!;
+        const before = (socket.deserializeAttachment() as { used: number }).used;
+        const pending = relay.webSocketMessage(socket, frame);
+        // Deterministically model another event consuming a token at the digest's
+        // async boundary; completion must not overwrite that event's attachment.
+        const latest = socket.deserializeAttachment() as { used: number };
+        latest.used++;
+        socket.serializeAttachment(latest);
+        await pending;
+        return { before, after: (socket.deserializeAttachment() as { used: number }).used };
+      });
+      expect(usage.after).toBe(usage.before + 2);
+    } finally { inbox.close(); }
+  });
+
+  it("does not revive an invalidated session when an announcement finishes hashing", async () => {
+    const a = await identity();
+    const id = "b2".repeat(32); const { inbox } = await connect("room", id, a);
+    const stub = bindings.ROOMS.get(bindings.ROOMS.idFromName(id));
+    try {
+      const bytes = packet(a.peer, "ffffffffffffffff", 1);
+      const frame = JSON.stringify({ type: "packet", id: await sha256(bytes), packet: btoa(String.fromCharCode(...bytes)) });
+      const status = await runInDurableObject(stub, async (instance, state) => {
+        const relay = instance as unknown as { webSocketMessage(socket: WebSocket, raw: string): Promise<void> };
+        const socket = state.getWebSockets()[0]!;
+        const pending = relay.webSocketMessage(socket, frame);
+        const latest = socket.deserializeAttachment() as Record<string, unknown>;
+        latest.failed = true;
+        socket.serializeAttachment(latest);
+        await pending;
+        const attachment = socket.deserializeAttachment() as Record<string, unknown>;
+        return { failed: attachment.failed, announcement: attachment.announcement };
+      });
+      expect(status).toEqual({ failed: true, announcement: undefined });
     } finally { inbox.close(); }
   });
 
@@ -340,6 +408,7 @@ describe("bounded protocol parsing", () => {
   it("rejects malformed and oversized frames without allocation of a packet", () => {
     expect(() => parseFrame("[]", 10)).toThrow();
     expect(() => parseFrame("{", 10)).toThrow();
+    expect(() => parseFrame("x".repeat(10000), 100)).toThrow("frame_size");
     expect(() => parseFrame(JSON.stringify({ text: "界".repeat(100) }), 100)).toThrow("frame_size");
     expect(() => decodePacket("!bad", 100)).toThrow();
     expect(() => decodePacket("A".repeat(1000), 100)).toThrow();

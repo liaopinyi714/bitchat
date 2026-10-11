@@ -10,8 +10,14 @@ import com.bitchat.android.ui.MessageManager
 import com.bitchat.android.ui.NoiseSessionDelegate
 import com.bitchat.android.ui.PrivateChatManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -22,23 +28,26 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.util.Date
 import java.util.UUID
+import kotlin.coroutines.CoroutineContext
 
 @RunWith(RobolectricTestRunner::class)
 class IncomingMessageAdmissionTest {
     private lateinit var context: Context
     private lateinit var databaseName: String
     private lateinit var repository: ConversationRepository
+    private lateinit var storageCipher: InMemoryConversationStorageCipher
     private val repositoriesToClose = mutableListOf<ConversationRepository>()
 
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         databaseName = "admission-test-${UUID.randomUUID()}.db"
+        storageCipher = InMemoryConversationStorageCipher()
         repository = ConversationRepository(
             context = context,
             dispatcher = Dispatchers.Unconfined,
             databaseName = databaseName,
-            storageCipher = InMemoryConversationStorageCipher()
+            storageCipher = storageCipher
         )
         repositoriesToClose += repository
         AppStateStore.setConversationRepositoryForTest(repository)
@@ -152,6 +161,109 @@ class IncomingMessageAdmissionTest {
                 ?.single { it.id == older.id }
                 ?.deliveryStatus
         )
+    }
+
+    @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun `cancelled queued admission releases its message reservation`() = runTest {
+        val databaseDispatcher = QueuedDispatcher()
+        repository = ConversationRepository(
+            context, databaseDispatcher, databaseName, storageCipher
+        ).also {
+            repositoriesToClose += it
+            AppStateStore.setConversationRepositoryForTest(it)
+        }
+        val message = privateMessage("cancelled-before-write")
+        val first = async(start = CoroutineStart.UNDISPATCHED) {
+            AppStateStore.addPrivateMessageDurably("peer-a", message)
+        }
+        first.cancel()
+        databaseDispatcher.runQueued()
+        runCurrent()
+
+        val retry = async(start = CoroutineStart.UNDISPATCHED) {
+            AppStateStore.addPrivateMessageDurably("peer-a", message)
+        }
+        databaseDispatcher.runQueued()
+        runCurrent()
+
+        assertTrue(retry.await())
+        assertEquals(listOf(message), AppStateStore.privateMessages.value.getValue("peer-a"))
+    }
+
+    @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun `history load finishing after a clear cannot resurrect old state`() = runTest {
+        assertTrue(IncomingMessageAdmission.admitToAppState(privateMessage("before-clear")))
+        val databaseDispatcher = QueuedDispatcher()
+        repository = ConversationRepository(
+            context, databaseDispatcher, databaseName, storageCipher
+        ).also {
+            repositoriesToClose += it
+            AppStateStore.setConversationRepositoryForTest(it)
+        }
+        val loading = async(start = CoroutineStart.UNDISPATCHED) {
+            AppStateStore.loadPrivateConversationHistory("peer-a")
+        }
+        databaseDispatcher.runQueued()
+        AppStateStore.clear()
+        runCurrent()
+
+        assertFalse(loading.await())
+        assertTrue(AppStateStore.privateMessages.value.isEmpty())
+    }
+
+    @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun `queued admission from a cleared generation cannot recreate stored messages`() = runTest {
+        val databaseDispatcher = QueuedDispatcher()
+        repository = ConversationRepository(
+            context, databaseDispatcher, databaseName, storageCipher
+        ).also {
+            repositoriesToClose += it
+            AppStateStore.setConversationRepositoryForTest(it)
+        }
+        val incoming = async(start = CoroutineStart.UNDISPATCHED) {
+            AppStateStore.addPrivateMessageDurably("peer-a", privateMessage("stale-write"))
+        }
+        AppStateStore.clear()
+        databaseDispatcher.runQueued()
+        runCurrent()
+
+        assertFalse(incoming.await())
+        var restored: PersistedConversationSnapshot? = null
+        repository.reload { restored = it }
+        databaseDispatcher.runQueued()
+        assertTrue(requireNotNull(restored).chats.isEmpty())
+    }
+
+    @Test
+    fun `undo captured before panic cannot restore erased private messages`() {
+        assertTrue(IncomingMessageAdmission.admitToAppState(privateMessage("before-panic")))
+        val deletion = requireNotNull(runBlocking {
+            AppStateStore.deletePrivateConversationAndWait("peer-a")
+        })
+        assertTrue(runBlocking { AppStateStore.panicClearPrivateConversations() })
+        AppStateStore.resumePrivateConversationsAfterPanic()
+
+        assertFalse(runBlocking { AppStateStore.restoreDeletedConversation(deletion) })
+        assertTrue(AppStateStore.privateMessages.value.isEmpty())
+        assertTrue(requireNotNull(runBlocking {
+            repository.loadConversationAndWait("peer-a")
+        }).chats.isEmpty())
+    }
+
+    @Test
+    fun `history reload clears a stale unread badge when all rows are read`() {
+        val message = privateMessage("read-in-store")
+        assertTrue(IncomingMessageAdmission.admitToAppState(message))
+        repository.markRead(message.id)
+        runBlocking { repository.awaitPendingWrites() }
+
+        assertTrue(runBlocking { AppStateStore.loadPrivateConversationHistory("peer-a") })
+
+        assertTrue(AppStateStore.unreadPrivateMessageCounts.value.isEmpty())
+        assertTrue(message.id in AppStateStore.readPrivateMessageIDs.value)
     }
 
     @Test
@@ -309,5 +421,17 @@ class IncomingMessageAdmissionTest {
         override fun hasEstablishedSession(peerID: String) = false
         override fun initiateHandshake(peerID: String) = Unit
         override fun getMyPeerID() = "self"
+    }
+
+    private class QueuedDispatcher : CoroutineDispatcher() {
+        private val queued = ArrayDeque<Runnable>()
+
+        override fun dispatch(context: CoroutineContext, block: Runnable) {
+            queued.addLast(block)
+        }
+
+        fun runQueued() {
+            while (queued.isNotEmpty()) queued.removeFirst().run()
+        }
     }
 }

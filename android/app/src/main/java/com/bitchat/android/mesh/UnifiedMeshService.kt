@@ -129,6 +129,8 @@ class UnifiedMeshService(
             isBleReady(recipientPeerID) -> bluetooth.sendPrivateMessage(content, recipientPeerID, recipientNickname, messageID)
             isWifiReady(recipientPeerID) -> wifiService()?.sendPrivateMessage(content, recipientPeerID, recipientNickname, messageID)
             online.isOnline(recipientPeerID) -> online.sendPrivateMessage(content, recipientPeerID, recipientNickname, messageID)
+            !isBleConnected(recipientPeerID) && !isWifiConnected(recipientPeerID) && online.canQueuePrivateMessage(recipientPeerID) ->
+                online.sendPrivateMessage(content, recipientPeerID, recipientNickname, messageID)
             isBleConnected(recipientPeerID) || (isBleEnabled() && !isWifiConnected(recipientPeerID)) ->
                 bluetooth.sendPrivateMessage(content, recipientPeerID, recipientNickname, messageID)
             else -> wifiService()?.sendPrivateMessage(content, recipientPeerID, recipientNickname, messageID)

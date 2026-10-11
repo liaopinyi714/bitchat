@@ -95,7 +95,7 @@ abstract class RelayObject extends DurableObject<Env> {
         ws.send(JSON.stringify({ type: "ready", protocol: VERSION, owner: config?.owner, commitment: config?.commitment ?? undefined }));
         for (const other of this.ctx.getWebSockets()) {
           const peer = other.deserializeAttachment() as Attachment | null;
-          if (other !== ws && peer?.identity && peer.announcement) {
+          if (other !== ws && peer?.identity && !peer.failed && peer.announcement) {
             ws.send(JSON.stringify({ type: "packet", peer: peer.identity.peer, packet: peer.announcement }));
           }
         }
@@ -120,7 +120,11 @@ abstract class RelayObject extends DurableObject<Env> {
         this.ctx.storage.sql.exec("UPDATE room_config SET commitment=? WHERE singleton=1", frame.commitment);
         ws.send(JSON.stringify({ type: "protected", commitment: frame.commitment }));
         for (const other of this.ctx.getWebSockets()) {
-          if (other !== ws) { this.sendSafe(other, JSON.stringify({ type: "error", code: "password_changed" })); other.close(1000, "password_changed"); }
+          if (other !== ws) {
+            this.sendSafe(other, JSON.stringify({ type: "error", code: "password_changed" }));
+            this.markFailed(other);
+            try { other.close(1000, "password_changed"); } catch { /* already closed */ }
+          }
         }
         return;
       }
@@ -131,13 +135,17 @@ abstract class RelayObject extends DurableObject<Env> {
       if (historical && (this.kind !== "room" || ![1, 2].includes(info.type))) throw new ProtocolError("invalid_history");
       if (!historical && info.sender !== state.identity.peer) throw new ProtocolError("packet_sender");
       const id = await sha256(packet);
+      // Digesting yields to other events. Never write the attachment snapshot from
+      // before the await back over newer rate counters or a revoked session.
+      const current = ws.deserializeAttachment() as Attachment | null;
+      if (!current?.identity || current.failed) return;
       if (frame.id !== id) throw new ProtocolError("packet_hash");
       // Android verifies the original packet signature and encrypted payload.
       const forwarded = JSON.stringify({ type: "packet", id, peer: info.sender, packet: frame.packet });
       if (info.type === 1 && !historical) {
         if (packet.length > 8192) throw new ProtocolError("announcement_size");
-        state.announcement = frame.packet as string;
-        ws.serializeAttachment(state);
+        current.announcement = frame.packet as string;
+        ws.serializeAttachment(current);
       }
 
       if (this.kind === "room") {
@@ -167,14 +175,19 @@ abstract class RelayObject extends DurableObject<Env> {
       ws.send(JSON.stringify({ type: "accepted", id }));
     } catch (error) {
       const code = error instanceof ProtocolError ? error.message : "internal_error";
-      const state = ws.deserializeAttachment() as Attachment | null;
-      if (state) { state.failed = true; state.challengePrivate = ""; state.nonce = ""; ws.serializeAttachment(state); }
+      this.markFailed(ws);
       try { ws.send(JSON.stringify({ type: "error", code })); ws.close(1008, code); } catch { /* already closed */ }
     }
   }
 
   private sendSafe(ws: WebSocket, frame: string): boolean {
+    if ((ws.deserializeAttachment() as Attachment | null)?.failed) return false;
     try { ws.send(frame); return true; } catch { return false; }
+  }
+
+  private markFailed(ws: WebSocket): void {
+    const state = ws.deserializeAttachment() as Attachment | null;
+    if (state) { state.failed = true; state.challengePrivate = ""; state.nonce = ""; ws.serializeAttachment(state); }
   }
 
   private initQueue(): void {
@@ -226,10 +239,14 @@ abstract class RelayObject extends DurableObject<Env> {
 
   webSocketClose(ws: WebSocket, code: number): void {
     const state = ws.deserializeAttachment() as Attachment | null;
+    this.markFailed(ws);
     if (state?.identity && this.kind === "room") {
       const peer = state.identity.peer;
       const others = this.ctx.getWebSockets().filter((other) => other !== ws);
-      if (!others.some((other) => (other.deserializeAttachment() as Attachment | null)?.identity?.peer === peer)) {
+      if (!others.some((other) => {
+        const session = other.deserializeAttachment() as Attachment | null;
+        return !session?.failed && session?.identity?.peer === peer;
+      })) {
         for (const other of others) {
           if ((other.deserializeAttachment() as Attachment | null)?.identity) this.sendSafe(other, JSON.stringify({ type: "peer_left", peer }));
         }
@@ -237,7 +254,10 @@ abstract class RelayObject extends DurableObject<Env> {
     }
     try { ws.close(code); } catch { /* already closed */ }
   }
-  webSocketError(ws: WebSocket): void { try { ws.close(1011, "connection_error"); } catch { /* already closed */ } }
+  webSocketError(ws: WebSocket): void {
+    this.markFailed(ws);
+    try { ws.close(1011, "connection_error"); } catch { /* already closed */ }
+  }
 }
 
 export class RoomObject extends RelayObject { protected get kind(): "room" { return "room"; } }

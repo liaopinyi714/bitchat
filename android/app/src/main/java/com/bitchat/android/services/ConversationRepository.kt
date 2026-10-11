@@ -146,8 +146,12 @@ class ConversationRepository internal constructor(
         aliases: Set<String>,
         displayName: String?,
         message: BitchatMessage,
-        isRead: Boolean
+        isRead: Boolean,
+        shouldWrite: () -> Boolean = { true }
     ): Boolean = withContext(dispatcher) {
+        // Check lifecycle admission on the serial writer. If a wipe ran while this coroutine
+        // was waiting to dispatch, it must not recreate the erased conversation afterwards.
+        if (!shouldWrite()) return@withContext false
         upsertMessageLocked(conversationID, aliases, displayName, message, isRead)
     }
 
@@ -207,8 +211,10 @@ class ConversationRepository internal constructor(
 
     internal suspend fun setConversationReadAndWait(
         conversationID: String,
-        isRead: Boolean
+        isRead: Boolean,
+        shouldWrite: () -> Boolean = { true }
     ): ConversationReadResult = withContext(dispatcher) {
+        if (!shouldWrite()) return@withContext ConversationReadResult(success = false)
         try {
             ConversationReadResult(
                 success = true,
@@ -255,8 +261,10 @@ class ConversationRepository internal constructor(
 
     suspend fun deleteConversationAndWait(
         conversationID: String,
-        aliases: Set<String>
+        aliases: Set<String>,
+        shouldWrite: () -> Boolean = { true }
     ): Boolean = withContext(dispatcher) {
+        if (!shouldWrite()) return@withContext false
         deleteConversationLocked(conversationID, aliases)
     }
 
@@ -265,8 +273,10 @@ class ConversationRepository internal constructor(
         aliases: Set<String>,
         displayName: String?,
         messages: List<BitchatMessage>,
-        readMessageIDs: Set<String>
+        readMessageIDs: Set<String>,
+        shouldWrite: () -> Boolean = { true }
     ): Boolean = withContext(dispatcher) {
+        if (!shouldWrite()) return@withContext false
         try {
             deleteStoredMedia(
                 database.restoreConversation(
@@ -707,7 +717,7 @@ internal class ConversationDatabase(
             arrivalOrder = arrivalOrder,
             deletedMessageIDs = loadDeletedMessageIDs(),
             displayNames = loadConversationDisplayNames(displayNameConversationID),
-            unreadCounts = loadUnreadCounts(),
+            unreadCounts = loadUnreadCounts(displayNameConversationID),
             receivedAtByMessageID = receivedAtByMessageID,
             arrivalSequenceByMessageID = arrivalSequenceByMessageID
         )
@@ -767,15 +777,15 @@ internal class ConversationDatabase(
         }
     }
 
-    private fun loadUnreadCounts(): Map<String, Int> =
+    private fun loadUnreadCounts(conversationID: String?): Map<String, Int> =
         readableDatabase.rawQuery(
             """
-            SELECT conversation_id, COUNT(*)
+            SELECT conversation_id, SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END)
             FROM private_messages
-            WHERE is_read = 0
+            ${if (conversationID == null) "" else "WHERE conversation_id = ? COLLATE NOCASE"}
             GROUP BY conversation_id
             """.trimIndent(),
-            null
+            conversationID?.let { arrayOf(it) }
         ).use { cursor ->
             buildMap {
                 while (cursor.moveToNext()) put(cursor.getString(0), cursor.getInt(1))
@@ -798,6 +808,29 @@ internal class ConversationDatabase(
         var messageInserted = false
         writableDatabase.inTransaction {
             if (isDeletedMessageLocked(this, message.id)) return@inTransaction
+            val existing = query(
+                "private_messages", MESSAGE_COLUMNS, "message_id = ?",
+                arrayOf(message.id), null, null, null
+            ).use { cursor ->
+                if (cursor.moveToFirst()) {
+                    Triple(
+                        cursor.string("conversation_id"),
+                        cursor.toMessage(),
+                        cursor.boolean("is_read")
+                    )
+                } else null
+            }
+            if (existing != null) {
+                // Message IDs are peer supplied. A collision is not evidence that two peers are
+                // aliases, even when the original row was unloaded from the in-memory summary.
+                val knownConversations = (aliases + normalizedID).map {
+                    resolveStoredConversationLocked(this, it)
+                }
+                if (
+                    !samePrivateMessage(existing.second, message) ||
+                    knownConversations.none { it.equals(existing.first, ignoreCase = true) }
+                ) return@inTransaction
+            }
             mergeAliasesLocked(
                 db = this,
                 targetConversationID = normalizedID,
@@ -805,6 +838,17 @@ internal class ConversationDatabase(
                 displayName = displayName,
                 now = now
             )
+            if (existing != null) {
+                if (isRead && !existing.third) {
+                    update(
+                        "private_messages",
+                        ContentValues().apply { put("is_read", 1) },
+                        "message_id = ?",
+                        arrayOf(message.id)
+                    )
+                }
+                return@inTransaction
+            }
             val values = message.toContentValues(normalizedID, isRead)
             val inserted = insertWithOnConflict(
                 "private_messages",
@@ -815,41 +859,6 @@ internal class ConversationDatabase(
             messageInserted = inserted != -1L
             if (inserted != -1L) {
                 registerAttachmentLocked(this, message)
-            }
-            if (inserted == -1L) {
-                val existingConversation = rawQuery(
-                    "SELECT conversation_id, is_read FROM private_messages WHERE message_id = ?",
-                    arrayOf(message.id)
-                ).use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        cursor.string("conversation_id") to cursor.boolean("is_read")
-                    } else {
-                        null
-                    }
-                }
-                if (existingConversation != null) {
-                    val canonicalExisting = resolveStoredConversationLocked(
-                        this,
-                        existingConversation.first
-                    )
-                    if (!canonicalExisting.equals(normalizedID, ignoreCase = true)) {
-                        mergeAliasesLocked(
-                            db = this,
-                            targetConversationID = normalizedID,
-                            aliases = aliases + canonicalExisting,
-                            displayName = displayName,
-                            now = now
-                        )
-                    }
-                    if (isRead && !existingConversation.second) {
-                        update(
-                            "private_messages",
-                            ContentValues().apply { put("is_read", 1) },
-                            "message_id = ?",
-                            arrayOf(message.id)
-                        )
-                    }
-                }
             }
             updateConversationMetadataLocked(this, normalizedID, displayName, now)
             orphanedMediaPaths += pruneConversationLocked(this, normalizedID)
@@ -871,11 +880,13 @@ internal class ConversationDatabase(
         arrayOf(message.id)
     ).use { cursor ->
         if (!cursor.moveToFirst()) return@use false
-        val stored = cursor.toMessage()
+        samePrivateMessage(cursor.toMessage(), message)
+    }
+
+    private fun samePrivateMessage(stored: BitchatMessage, message: BitchatMessage): Boolean =
         stored.isPrivate && message.isPrivate &&
             stored.senderPeerID == message.senderPeerID &&
             stored.content == message.content && stored.type == message.type
-    }
 
     fun updateDeliveryStatus(messageID: String, status: DeliveryStatus) {
         val db = writableDatabase

@@ -598,12 +598,13 @@ fun MessageInput(
                                     )
                             ) {
                                 ImagePickerButton(
-                                    onImageReady = { outPath ->
-                                        onSendImageNote(
-                                            latestSelectedPeer.value,
-                                            latestChannel.value,
-                                            outPath
-                                        )
+                                    onImagePreparationStarted = {
+                                        val peer = latestSelectedPeer.value
+                                        val channel = latestChannel.value
+                                        val receiver: (String) -> Unit = { outPath ->
+                                            onSendImageNote(peer, channel, outPath)
+                                        }
+                                        receiver
                                     }
                                 )
                             }

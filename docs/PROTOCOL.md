@@ -46,6 +46,8 @@ Each client's per-room GossipSyncManager stores at most 100 recent text packets 
 
 `peer_left` removes room presence. `accepted` means the server processed a transport frame, not that the peer read or persisted a message. Mailbox `received` is a transport acknowledgement that deletes a pending copy; original encrypted delivery/read receipts remain authoritative. Incoming packets may still fail application validation after transport receipt, so recovery also depends on the original sender outbox.
 
+Starting with client 0.2.4, temporary receive-queue overload does not emit `received`; the mailbox reconnects with backoff so an existing queued envelope remains available. Permanently rejected content is consumed to avoid infinite replay. The bounded queue protects instantaneous work, not a total peer-count quota. Online relay writes are still not automatically stored; unconfirmed online text recovery relies on the sender outbox. Worker 0.2.4 re-reads attachments after asynchronous hashing and excludes failed sessions from routing; frame formats, authentication and retention rules are unchanged.
+
 ## Topic envelope
 
 ```text
